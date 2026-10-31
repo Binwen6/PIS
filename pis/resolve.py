@@ -10,7 +10,10 @@ DeepSeek's API cannot browse, so the work is split:
 from __future__ import annotations
 
 import difflib
+import os
 import re
+import threading
+import time
 
 import feedparser
 
@@ -62,12 +65,39 @@ def _arxiv(query: str) -> list[dict]:
         return []
 
 
+_S2_LOCK = threading.Lock()
+_S2_LAST = [0.0]
+S2_INTERVAL = 1.5   # seconds between calls
+
+
+def _s2_get(params: dict):
+    """Semantic Scholar's shared anonymous quota is small: serialise calls across threads, back off on 429.
+    Set S2_API_KEY (free from semanticscholar.org) for a dedicated quota."""
+    headers = {"x-api-key": os.environ["S2_API_KEY"]} if os.environ.get("S2_API_KEY") else {}
+    for attempt in range(6):
+        with _S2_LOCK:
+            wait = S2_INTERVAL - (time.time() - _S2_LAST[0])
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                r = http_get("https://api.semanticscholar.org/graph/v1/paper/search", timeout=30, retries=1,
+                             params=params, headers=headers)
+            except RuntimeError as e:          # http_get raises on 429 / 5xx after its own retry
+                if "429" not in str(e):
+                    raise
+                r = None
+            _S2_LAST[0] = time.time()
+        if r is not None and r.status_code != 429:
+            return r
+        time.sleep(5 * (attempt + 1))
+    raise RuntimeError("Semantic Scholar still rate-limited after 6 attempts")
+
+
 def _s2(query: str) -> list[dict]:
     try:
-        r = http_get("https://api.semanticscholar.org/graph/v1/paper/search", timeout=30, retries=3,
-                     params={"query": query, "limit": 8,
-                             "fields": "title,abstract,externalIds,openAccessPdf,venue,year"})
+        r = _s2_get({"query": query, "limit": 8, "fields": "title,abstract,externalIds,openAccessPdf,venue,year"})
         if r.status_code != 200:
+            log.warning("Semantic Scholar search got HTTP %s (%s)", r.status_code, query[:60])
             return []
         out = []
         for p in r.json().get("data", []):

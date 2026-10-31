@@ -438,6 +438,23 @@ ATOM = b"""<feed xmlns="http://www.w3.org/2005/Atom">
     Theory</title><summary>We allocate tokens by ELBO.</summary></entry></feed>"""
 
 
+import pis.resolve as _resolve_mod  # noqa: E402
+_resolve_mod.S2_INTERVAL = 0
+
+
+def test_s2_backs_off_on_429(monkeypatch):
+    from pis import resolve
+    calls = []
+
+    def get(url, **kw):
+        calls.append(url)
+        return Resp(status=429) if len(calls) == 1 else Resp(js={"data": [{"title": "T", "externalIds": {"ArXiv": "2610.1"}}]})
+    monkeypatch.setattr(common.requests, "get", get)
+    monkeypatch.setattr(resolve.time, "sleep", lambda s: None)
+    monkeypatch.setattr(common.time, "sleep", lambda s: None)
+    assert resolve._s2("q")[0]["arxiv_id"] == "2610.1" and len(calls) == 2
+
+
 def _get_no_s2(url, **kw):
     if "export.arxiv.org" in url:
         return Resp(ATOM)
