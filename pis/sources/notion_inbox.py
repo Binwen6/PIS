@@ -31,7 +31,7 @@ def fetch(notion: Notion, db_id: str) -> list[Item]:
         note = _plain(props.get("Note", {}))
         if not url:
             continue
-        title, text = fetch_text(url)
+        title, text, img = fetch_text(url)
         items.append(Item(
             source="inbox",
             title=(name if name and not name.startswith("http") else title) or url,
@@ -40,6 +40,7 @@ def fetch(notion: Notion, db_id: str) -> list[Item]:
             note=note,
             origin="微信公众号" if "mp.weixin.qq.com" in url else "我的收藏",
             notion_id=row["id"],
+            extra={"image": img} if img else {},
         ))
     log.info("Notion inbox: %d unprocessed links", len(items))
     return items

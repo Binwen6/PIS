@@ -40,6 +40,7 @@ def fetch(feed_list: list[dict], now: datetime, window_hours: int) -> list[Item]
             if e.get("content"):
                 body = e.content[0].get("value", "")
             body = clean_html(body or e.get("summary", ""))[:3000]
+            media = (e.get("media_thumbnail") or e.get("media_content") or [{}])[0].get("url", "")
             out.append(Item(
                 source=f.get("kind", "blog"),
                 title=clean_html(e.get("title", "")) or "(无标题)",
@@ -48,6 +49,7 @@ def fetch(feed_list: list[dict], now: datetime, window_hours: int) -> list[Item]
                 authors=clean_html(e.get("author", "")),
                 origin=f.get("name", ""),
                 published=pub,
+                extra={"image": media} if media.startswith("https://") else {},
             ))
             n += 1
         log.info("feed %s: %d new", f.get("name"), n)

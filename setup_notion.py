@@ -3,7 +3,7 @@
 1. In Notion, create a page called「PIS」, then  ··· → Connections → add your integration.
 2. NOTION_TOKEN=secret_xxx python setup_notion.py <PIS page URL or id>
 
-Creates under PIS:  🧭 研究画像 (filled from config/profile.md)  and  📥 Inbox (database),
+Creates under PIS:  🧭 研究画像 (from config/profile.md) · 🧠 记忆 (auto-maintained) · 📥 Inbox (database),
 and prints the IDs to put into GitHub Secrets.
 """
 import re
@@ -48,6 +48,9 @@ def main():
     prof = n.find_child_page(pis, "🧭 研究画像") or n.create_page(
         pis, "🧭 研究画像",
         [N.callout(N.rich("直接编辑本页即可更新研究兴趣，下次运行自动生效。"), "✏️")] + profile_blocks(md), emoji="🧭")
+    mem = n.find_child_page(pis, "🧠 记忆") or n.create_page(
+        pis, "🧠 记忆", [N.callout(N.rich("PIS 每天运行后会在这里写入它对你近期兴趣的理解。"), "🧠", "purple_background")],
+        emoji="🧠")
     db = n.req("POST", "/databases", json={
         "parent": {"type": "page_id", "page_id": pis},
         "icon": {"type": "emoji", "emoji": "📥"},
@@ -61,6 +64,7 @@ def main():
     })
     print("NOTION_PIS_PAGE_ID     =", pis)
     print("NOTION_PROFILE_PAGE_ID =", prof)
+    print("NOTION_MEMORY_PAGE_ID  =", mem)
     print("NOTION_INBOX_DB_ID     =", db["id"])
 
 

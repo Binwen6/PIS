@@ -79,27 +79,74 @@ class FakeLLM:
         self.model, self.usage = "fake", {"prompt_tokens": 1, "completion_tokens": 1}
 
     def json(self, system, user, **kw):
-        ids = [int(x) for x in re.findall(r"^\[(\d+)\]", user, re.M)]
+        body = user.split("# 待评分条目")[-1].split("# 今日条目")[-1]
+        ids = [int(x) for x in re.findall(r"^\[(\d+)\]", body, re.M)]
         if "评分" in system:
-            return {"results": [{"id": i, "score": 2 if "Cats" in user.split(f"[{i}]")[1][:80] else 8,
+            return {"results": [{"id": i, "score": 2 if "Cats" in body.split(f"[{i}]")[1][:80] else 8,
                                  "why": "命中 RL 推理"} for i in ids]}
-        return {"headline": "RLVR 走向 Agent", "overview": "今天 GRPO 用到了 Agent 上 [1]，另见 [2, 3] 与收藏 [5]。",
-                "themes": [{"title": "推理", "body": "讨论 [1][4]，以及不存在的 [99]。"}],
+        if "动态兴趣记忆" in system:
+            assert "Agent 评测新基准" in user and "Old ticked paper" in user     # inbox + ticked are fed in
+            return {"interests": [{"topic": "Agent 评测", "weight": 4, "trend": "up", "evidence": "收藏+勾选",
+                                   "last_seen": "2026-10-31"}],
+                    "threads": [{"name": "RLVR for agents", "summary": "GRPO 扩展到 agent", "last_seen": "2026-10-31"}],
+                    "preferences": ["偏好有代码"], "notes": "从推理转向 agent 评测"}
+        assert "动态记忆" in user and "RLVR for agents" in user                   # memory reaches the digest prompt
+        return {"headline": "RLVR 走向 Agent", "takeaways": ["**GRPO** 用于 `Agent` [1]", "收藏 [4]"],
+                "themes": [{"emoji": "🧠", "title": "推理", "body": "讨论 [1][4]，以及不存在的 [99]。",
+                            "so_what": "可对比 [1]", "refs": [1, 2, 99], "key_ref": 1},
+                           {"emoji": "🛠", "title": "工具", "body": "[3]", "refs": [3, 4], "key_ref": 42}],
+                "threads": [{"name": "RLVR for agents", "update": "新进展 [1]"}],
                 "items": [{"id": i, "tldr": f"要点{i}", "detail": "收藏总结" if i == ids[-1] else ""} for i in ids]}
+
+
+def check_blocks(blocks, depth=0):
+    """Notion API constraints: <=100 children/request, <=2 nesting levels, <=2000 chars & <=100 rich_text items."""
+    assert depth <= 2, "nesting too deep"
+    for b in blocks:
+        data = b[b["type"]]
+        rts = [data.get("rich_text", [])] + [c for r in data.get("cells", []) for c in [r]]
+        for rt in rts:
+            assert len(rt) <= 100 and all(len(t["text"]["content"]) <= 2000 for t in rt)
+        kids = data.get("children", [])
+        assert len(kids) <= 100
+        if kids:
+            check_blocks(kids, depth + 1)
+
+
+MEM_JSON = json.dumps({"interests": [], "threads": [{"name": "RLVR for agents", "summary": "x", "last_seen": "2026-10-29"}],
+                       "preferences": [], "notes": "", "recent_headlines": ["2026-10-30：昨天头条"], "feedback_seen": []})
 
 
 class FakeNotion:
     def __init__(self, *a, **k):
-        self.pages, self.updated = [], []
+        self.pages, self.updated, self.replaced = [], [], None
 
     def find_child_page(self, parent, title):
-        return None
+        return "day-1030" if (parent, title) == ("pis", "2026-10-30") else None
+
+    def children(self, bid):
+        if bid == "mem":
+            return [{"id": "tg", "type": "toggle", "toggle": {}}]
+        if bid == "tg":
+            return [{"id": "c", "type": "code", "code": {"rich_text": [{"plain_text": MEM_JSON}]}}]
+        if bid == "day-1030":
+            return [{"id": "sub", "type": "child_page", "child_page": {"title": "论文精选（3）"}}]
+        if bid == "sub":
+            return [{"type": "to_do", "to_do": {"checked": True, "rich_text": [
+                        {"plain_text": "[1] "}, {"plain_text": "Old ticked paper", "href": "https://arxiv.org/abs/2610.0"}]}},
+                    {"type": "to_do", "to_do": {"checked": False, "rich_text": [{"plain_text": "Unticked"}]}}]
+        return []
+
+    def replace_content(self, pid, blocks):
+        check_blocks(blocks)
+        json.dumps(blocks)
+        self.replaced = (pid, blocks)
 
     def page_text(self, pid):
         return "## 核心兴趣\n- reinforcement learning, reasoning, agents"
 
     def create_page(self, parent, title, blocks, emoji="📰"):
-        assert all(len(t["text"]["content"]) <= 2000 for b in blocks for t in b[b["type"]].get("rich_text", []))
+        check_blocks(blocks)
         json.dumps(blocks)  # must be serialisable
         self.pages.append((parent, title, blocks))
         return f"page-{len(self.pages)}"
@@ -135,17 +182,31 @@ def test_end_to_end(monkeypatch, tmp_path):
     fake = FakeNotion()
     monkeypatch.setattr(M, "Notion", lambda *a, **k: fake)
     for k, v in {"NOTION_TOKEN": "x", "NOTION_PIS_PAGE_ID": "pis", "NOTION_INBOX_DB_ID": "db",
-                 "NOTION_PROFILE_PAGE_ID": "prof", "DEEPSEEK_API_KEY": "k"}.items():
+                 "NOTION_PROFILE_PAGE_ID": "prof", "NOTION_MEMORY_PAGE_ID": "mem",
+                 "DEEPSEEK_API_KEY": "k"}.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setattr(M, "ROOT", _root_copy(tmp_path))
     args = types.SimpleNamespace(dry_run=False, force=False, date="2026-10-31")
     assert M.run(args) == 0
 
     titles = [t for _, t, _ in fake.pages]
-    assert titles[0] == "2026-10-31"
-    assert any(t.startswith("📄 论文精选（2）") for t in titles), titles      # cat paper filtered out, HF-only added
-    assert any(t.startswith("🌐 动态与博客（1）") for t in titles), titles     # old blog post filtered by window
-    assert any(t.startswith("📌 我的收藏（1）") for t in titles), titles
+    assert titles == ["2026-10-31", "论文精选（2）", "动态与博客（1）", "我的收藏（1）"], titles
+    main = fake.pages[0][2]
+    types_ = [b["type"] for b in main]
+    for t in ("callout", "table_of_contents", "heading_2", "quote", "bookmark", "toggle"):
+        assert t in types_, (t, types_)
+    assert main[types_.index("bookmark")]["bookmark"]["url"] == "https://huggingface.co/papers/2610.00001"
+    mer = [b for b in main if b["type"] == "toggle"][0]["toggle"]["children"][0]["code"]
+    assert mer["language"] == "mermaid" and "I99" not in mer["rich_text"][0]["text"]["content"]
+    sub = fake.pages[1][2]
+    assert sum(b["type"] == "to_do" for b in sub) == 2
+    # memory page rewritten, ticked feedback remembered so it is not counted twice
+    pid, mblocks = fake.replaced
+    raw = [b for b in mblocks if b["type"] == "toggle"][0]["toggle"]["children"][0]["code"]["rich_text"]
+    mem = json.loads("".join(t["text"]["content"] for t in raw))
+    assert pid == "mem" and mem["interests"][0]["topic"] == "Agent 评测"
+    assert mem["feedback_seen"] == ["https://arxiv.org/abs/2610.0"]
+    assert mem["recent_headlines"][-1] == "2026-10-31：RLVR 走向 Agent"
     assert fake.updated and fake.updated[0][1]["Processed"]["checkbox"] is True
     assert "Agent 评测新基准" in fake.updated[0][1]["Name"]["title"][0]["text"]["content"]
     md = (M.ROOT / "out" / "2026-10-31.md").read_text()

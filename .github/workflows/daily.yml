@@ -33,6 +33,8 @@ jobs:
           NOTION_PIS_PAGE_ID: ${{ secrets.NOTION_PIS_PAGE_ID }}
           NOTION_INBOX_DB_ID: ${{ secrets.NOTION_INBOX_DB_ID }}
           NOTION_PROFILE_PAGE_ID: ${{ secrets.NOTION_PROFILE_PAGE_ID }}
+          NOTION_MEMORY_PAGE_ID: ${{ secrets.NOTION_MEMORY_PAGE_ID }}
+          DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
         run: python -m pis.main ${{ inputs.force && '--force' || '' }}
       - uses: actions/upload-artifact@v4
         if: always()

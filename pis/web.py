@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from .common import http_get, log
 
 
-def extract(html: str, url: str = "") -> tuple[str, str]:
+def extract(html: str, url: str = "") -> tuple[str, str, str]:
     soup = BeautifulSoup(html, "html.parser")
     for t in soup(["script", "style", "noscript", "svg", "nav", "footer", "header"]):
         t.decompose()
@@ -26,17 +26,20 @@ def extract(html: str, url: str = "") -> tuple[str, str]:
     text = node.get_text(" ", strip=True) if node else ""
     if len(text) < 80:                      # JS-rendered page (小红书/知乎 often) -> fall back to description
         text = meta("og:description") or meta("description") or text
-    return title, text
+    img = meta("og:image")
+    if not img.startswith("https://") or "qpic.cn" in img or "weixin" in img:
+        img = ""                     # 公众号图床有防盗链，在 Notion 中会显示为“未经允许不可引用”
+    return title, text, img
 
 
-def fetch_text(url: str, limit: int = 4000) -> tuple[str, str]:
+def fetch_text(url: str, limit: int = 4000) -> tuple[str, str, str]:
     try:
         r = http_get(url, timeout=30, retries=2)
         if r.status_code != 200:
-            return "", ""
+            return "", "", ""
         r.encoding = r.apparent_encoding or r.encoding
-        title, text = extract(r.text, url)
-        return title, text[:limit]
+        title, text, img = extract(r.text, url)
+        return title, text[:limit], img
     except Exception as e:  # noqa: BLE001
         log.warning("fetch %s failed: %s", url, e)
-        return "", ""
+        return "", "", ""

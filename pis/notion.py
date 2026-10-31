@@ -66,6 +66,15 @@ class Notion:
         for i in range(0, len(blocks), 100):
             self.req("PATCH", f"/blocks/{block_id}/children", json={"children": blocks[i:i + 100]})
 
+    def delete_block(self, block_id: str) -> None:
+        self.req("DELETE", f"/blocks/{block_id}")
+
+    def replace_content(self, page_id: str, blocks: list[dict]) -> None:
+        for b in self.children(page_id):
+            if b["type"] not in ("child_page", "child_database"):
+                self.delete_block(b["id"])
+        self.append(page_id, blocks)
+
     def archive(self, page_id: str) -> None:
         self.req("PATCH", f"/pages/{page_id}", json={"archived": True})
 
@@ -102,37 +111,45 @@ class Notion:
 
 # ---- block builders --------------------------------------------------------
 _CITE = re.compile(r"\[(\d+(?:\s*[,，]\s*\d+)*)\]")
+# inline syntax the LLM may use: **bold**, `code`, [3] / [2,5] citations
+_INLINE = re.compile(r"\*\*(.+?)\*\*|`([^`]+)`|\[(\d+(?:\s*[,，]\s*\d+)*)\]")
 
 
-def rich(text: str, *, link: str | None = None, bold: bool = False, color: str = "default") -> list[dict]:
+def rich(text: str, *, link: str | None = None, bold: bool = False, color: str = "default",
+         code: bool = False, italic: bool = False) -> list[dict]:
     out = []
     for i in range(0, max(len(text), 1), MAX_TEXT):
         t: dict = {"type": "text", "text": {"content": text[i:i + MAX_TEXT]}}
         if link:
             t["text"]["link"] = {"url": link}
-        if bold or color != "default":
-            t["annotations"] = {"bold": bold, "color": color}
+        if bold or code or italic or color != "default":
+            t["annotations"] = {"bold": bold, "code": code, "italic": italic, "color": color}
         out.append(t)
     return out
 
 
-def rich_with_citations(text: str, links: dict[int, str]) -> list[dict]:
-    """Turn '...见 [3][5] 或 [2, 4]' into text where each number links to the source URL."""
+def rich_with_citations(text: str, links: dict[int, str], color: str = "default") -> list[dict]:
+    """Inline-markdown -> rich text. '[3][5]' / '[2, 4]' become links to the sources."""
     out: list[dict] = []
     pos = 0
-    for m in _CITE.finditer(text):
+    for m in _INLINE.finditer(text or ""):
         if m.start() > pos:
-            out += rich(text[pos:m.start()])
-        nums = [int(n) for n in re.split(r"\s*[,，]\s*", m.group(1))]
-        out += rich("[")
-        for j, n in enumerate(nums):
-            if j:
-                out += rich(",")
-            out += rich(str(n), link=links.get(n), color="blue") if n in links else rich(str(n))
-        out += rich("]")
+            out += rich(text[pos:m.start()], color=color)
+        if m.group(1):
+            out += rich(m.group(1), bold=True, color=color)
+        elif m.group(2):
+            out += rich(m.group(2), code=True)
+        else:
+            nums = [int(n) for n in re.split(r"\s*[,，]\s*", m.group(3))]
+            out += rich("[", color=color)
+            for j, n in enumerate(nums):
+                if j:
+                    out += rich(",", color=color)
+                out += rich(str(n), link=links.get(n), color="blue", bold=True) if n in links else rich(str(n))
+            out += rich("]", color=color)
         pos = m.end()
-    if pos < len(text):
-        out += rich(text[pos:])
+    if pos < len(text or ""):
+        out += rich(text[pos:], color=color)
     return out[:100]   # Notion: max 100 rich_text objects per block
 
 
@@ -161,6 +178,41 @@ def callout(rt: list[dict], emoji: str = "💡", color: str = "gray_background")
 
 def toggle(rt: list[dict], children: list[dict]) -> dict:
     return _block("toggle", rt, children=children)
+
+
+def todo(rt: list[dict], children: list[dict] | None = None, checked: bool = False) -> dict:
+    b = _block("to_do", rt, checked=checked)
+    if children:
+        b["to_do"]["children"] = children
+    return b
+
+
+def quote(rt: list[dict], color: str = "default") -> dict:
+    return _block("quote", rt, color=color)
+
+
+def code(text: str, language: str = "plain text") -> dict:
+    return _block("code", rich(text), language=language)
+
+
+def bookmark(url: str) -> dict:
+    return {"object": "block", "type": "bookmark", "bookmark": {"url": url}}
+
+
+def image(url: str) -> dict:
+    return {"object": "block", "type": "image", "image": {"type": "external", "external": {"url": url}}}
+
+
+def toc() -> dict:
+    return {"object": "block", "type": "table_of_contents", "table_of_contents": {"color": "gray"}}
+
+
+def table(header: list[str], rows: list[list[list[dict]]]) -> dict:
+    def row(cells):
+        return {"object": "block", "type": "table_row", "table_row": {"cells": cells}}
+    return {"object": "block", "type": "table", "table": {
+        "table_width": len(header), "has_column_header": True, "has_row_header": False,
+        "children": [row([rich(h, bold=True) for h in header])] + [row(r) for r in rows][:99]}}
 
 
 def divider() -> dict:

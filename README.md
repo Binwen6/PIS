@@ -1,7 +1,15 @@
 # PIS · Personal Information Source
 
-每天早上 8 点前，在 Notion「PIS」页面下自动生成一个以日期命名的页面：
-一段按主题组织、带可点击出处编号的中文摘要，外加「📄 论文精选 / 🌐 动态与博客 / 📌 我的收藏」三个子页面。
+每天早上 8 点前，在 Notion「PIS」页面下自动生成一个以日期命名的简报页面。全程运行在 GitHub Actions 上，
+不依赖你的电脑或任何账号在线。系统会记住你的兴趣变化，越用越懂你。
+
+**每日页面长这样**
+- 📌 头条 callout → ⏱ 30 秒速览 → 目录
+- 按 *主题*（而不是按来源）组织的段落：综合比较多篇工作、讲清机制，正文中蓝色 **[n]** 可直接点开原文
+- 每个主题下附「💬 对你」的意义/下一步建议，以及最值得点开那一篇的预览卡片（bookmark）
+- 🧵 线索追踪：记忆中你在跟进的方向今天有什么新进展
+- ▸ 🗺 今日图谱（Mermaid 图，主题 → 条目）  ▸ 📋 全部条目一览（表格）
+- 子页面「📄 论文精选 / 🌐 动态与博客 / 📌 我的收藏」：每条是一个 ☐ 复选框，勾选即“想深读”
 
 ```
  GitHub Actions（每天 07:30 北京时间）
@@ -27,9 +35,10 @@
    pip install -r requirements.txt
    NOTION_TOKEN=ntn_xxx python setup_notion.py "<PIS 页面链接>"
    ```
-   会创建「🧭 研究画像」页面（内容来自 `config/profile.md`）和「📥 Inbox」数据库，并打印 3 个 ID。
-4. **GitHub**：把本项目推到一个 **私有** 仓库 → Settings → Secrets and variables → Actions，添加：
-   `DEEPSEEK_API_KEY`、`NOTION_TOKEN`、`NOTION_PIS_PAGE_ID`、`NOTION_PROFILE_PAGE_ID`、`NOTION_INBOX_DB_ID`
+   会创建「🧭 研究画像」「🧠 记忆」两个页面和「📥 Inbox」数据库，并打印 4 个 ID。
+4. **GitHub**：把本项目推到一个 **私有** 仓库 → Settings → Secrets and variables → Actions，添加 Secrets：
+   `DEEPSEEK_API_KEY`、`NOTION_TOKEN`、`NOTION_PIS_PAGE_ID`、`NOTION_PROFILE_PAGE_ID`、`NOTION_MEMORY_PAGE_ID`、`NOTION_INBOX_DB_ID`；
+   可选 Variable `DEEPSEEK_MODEL`（默认 `deepseek-chat`；DeepSeek 近期模型名变动频繁，请以官网模型列表为准）。
 5. **试跑**：Actions → *PIS daily digest* → Run workflow。之后每天自动运行。
 
 本地调试（不写 Notion，只输出 Markdown 到 `out/`）：
@@ -37,8 +46,16 @@
 DEEPSEEK_API_KEY=sk-xxx python -m pis.main --dry-run
 ```
 
-## 更新研究兴趣
-直接编辑 Notion 里的「🧭 研究画像」页面，下次运行即生效（`config/profile.md` 仅作兜底）。
+## 个性化：画像 + 记忆
+| | 🧭 研究画像 | 🧠 记忆 |
+|---|---|---|
+| 谁来写 | 你 | PIS 自动维护 |
+| 变化速度 | 慢（研究方向） | 快（近期热点、正在跟进的线索） |
+| 信号来源 | 你的手写描述 | 📥 Inbox 收藏与备注（强）、每日页面里 ☑ 勾选（强）、近几日推送主题（弱，仅用于线索承接） |
+
+每次运行：读取画像 + 记忆 + 前 3 天新勾选的条目 → 用于打分和写摘要 → 生成页面后再让 DeepSeek 更新记忆
+（兴趣权重、趋势 📈/📉、14 天无信号自动衰减、跟进线索、阅读偏好）。记忆页上半部分是可读表格，
+底部折叠的 JSON 是机器读取的数据源。只被推送、没被勾选的内容 **不会** 提高兴趣权重，避免“越推越窄”的自我强化。
 
 ## 把公众号文章送进 PIS（📥 Inbox）
 个人微信没有开放接口，「转发到文件传输助手/自己聊天框」的内容无法被云端稳定读取。推荐把“转发”换成一键“分享到 Inbox”：

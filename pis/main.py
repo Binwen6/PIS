@@ -6,6 +6,7 @@ Env:
   NOTION_PIS_PAGE_ID      the「PIS」page; daily pages are created under it
   NOTION_INBOX_DB_ID      optional,「📥 Inbox」database for hand-saved links
   NOTION_PROFILE_PAGE_ID  optional,「🧭 研究画像」page (overrides config/profile.md)
+  NOTION_MEMORY_PAGE_ID   optional,「🧠 记忆」page (dynamic interest memory, auto-maintained)
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from .common import Item, log, utcnow
 from .digest import make_digest
 from .llm import LLM
 from .notion import Notion
-from . import rank, render
+from . import memory, rank, render
 from .sources import arxiv, feeds, hf_daily, notion_inbox
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -85,19 +86,25 @@ def run(args) -> int:
             notion.archive(existing)
 
     profile = load_profile(notion)
+    mem_page = os.environ.get("NOTION_MEMORY_PAGE_ID")
+    mem = memory.load(notion, mem_page)
+    ticked = memory.collect_feedback(notion, parent, today, mem) if mem_page else []
+    context = f"# 研究画像（用户亲手写的长期兴趣）\n{profile}\n\n{memory.as_prompt(mem)}".strip()
+    if ticked:
+        context += "\n\n# 用户最近勾选想深读的条目\n" + "\n".join(f"- {t}" for t in ticked)
+
     llm = LLM(cfg["llm"]["base_url"], cfg["llm"]["model"])
     papers, news, inbox = gather(cfg, notion, now, today)
 
     acfg, fcfg, lcfg = cfg.get("arxiv", {}), cfg.get("feeds", {}), cfg["llm"]
     n_papers_raw = len(papers)
-    papers = rank.prefilter(papers, profile, acfg.get("prefilter_max", 800))
-    rank.score(llm, profile, papers + news, lcfg.get("score_batch_size", 40), lcfg.get("max_workers", 4))
+    papers = rank.prefilter(papers, context, acfg.get("prefilter_max", 800))
+    rank.score(llm, context, papers + news, lcfg.get("score_batch_size", 40), lcfg.get("max_workers", 4))
     top_papers = rank.select(papers, acfg.get("min_score", 6), acfg.get("max_in_digest", 15))
     top_news = rank.select(news, fcfg.get("min_score", 6), fcfg.get("max_in_digest", 10))
 
     numbered = list(enumerate(top_papers + top_news + inbox, start=1))
-    d = make_digest(llm, profile, numbered)
-    links = {n: it.url for n, it in numbered}
+    d = make_digest(llm, context, numbered)
     stats = (f"arXiv/HF 共 {n_papers_raw} 篇 → 精选 {len(top_papers)} 篇；动态 {len(news)} 条 → 精选 {len(top_news)} 条；"
              f"收藏 {len(inbox)} 条 · 模型 {llm.model} · tokens 入 {llm.usage['prompt_tokens']} / 出 {llm.usage['completion_tokens']}")
 
@@ -111,10 +118,18 @@ def run(args) -> int:
         print(md)
         return 0
 
-    page_id = notion.create_page(parent, title, render.main_blocks(d, links, stats), emoji="📰")
-    for sub_title, blocks in render.group_pages(numbered, d):
-        notion.create_page(page_id, sub_title, blocks, emoji=sub_title.split()[0])
+    page_id = notion.create_page(parent, title, render.main_blocks(title, d, numbered, stats), emoji="📰")
+    for sub_title, emoji, blocks in render.group_pages(numbered, d):
+        notion.create_page(page_id, sub_title, blocks, emoji=emoji)
     notion_inbox.mark_processed(notion, inbox)
+
+    if mem_page:   # learn from today's behaviour signals; failure here never loses the digest
+        try:
+            mem = memory.update(llm, profile, mem, today, inbox, ticked, d)
+            notion.replace_content(mem_page, memory.blocks(mem, today))
+            log.info("memory updated: %d interests, %d threads", len(mem["interests"]), len(mem["threads"]))
+        except Exception as e:  # noqa: BLE001
+            log.error("memory update failed: %s", e)
     log.info("Notion page created: https://www.notion.so/%s", page_id.replace("-", ""))
     return 0
 
