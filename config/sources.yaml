@@ -1,0 +1,43 @@
+# PIS 信息源配置
+timezone: Asia/Shanghai
+window_hours: 26          # 回看窗口（略大于 24h，防止定时任务延迟漏掉内容）
+
+llm:
+  base_url: https://api.deepseek.com
+  model: deepseek-chat     # 也可以换成 deepseek-reasoner，更贵更慢
+  score_batch_size: 40     # 相关度打分时每批多少条
+  max_workers: 4
+
+arxiv:
+  enabled: true
+  # arXiv 每日公告 RSS，周末/节假日没有新公告属正常
+  categories: [cs.CL, cs.LG, cs.AI, cs.CV]
+  include_cross_lists: true
+  prefilter_max: 800       # 超过这个数量时先用关键词粗筛，节省 token
+  min_score: 6             # 0-10，低于此分不进入摘要
+  max_in_digest: 15
+
+huggingface_daily:
+  enabled: true            # HF Daily Papers：社区热度信号（upvotes）
+
+notion_inbox:
+  enabled: true            # 读取 Notion「📥 Inbox」数据库中未处理的链接（公众号/小红书/知乎等手动收藏）
+
+feeds:
+  min_score: 6
+  max_in_digest: 10
+  list:
+    - {name: OpenAI News,        kind: blog, url: "https://openai.com/news/rss.xml"}
+    - {name: Google DeepMind,    kind: blog, url: "https://deepmind.google/blog/rss.xml"}
+    - {name: Google Research,    kind: blog, url: "https://research.google/blog/rss/"}
+    - {name: Hugging Face Blog,  kind: blog, url: "https://huggingface.co/blog/feed.xml"}
+    - {name: BAIR Blog,          kind: blog, url: "https://bair.berkeley.edu/blog/feed.xml"}
+    # ---- 以下需要你自己部署 RSSHub / wewe-rss 后把地址填进来 ----
+    # X / Twitter（RSSHub，需要配置 X 的 cookie/token）
+    # - {name: "X @karpathy", kind: social, url: "https://<your-rsshub>/twitter/user/karpathy"}
+    # 知乎用户动态（RSSHub，需 cookie）
+    # - {name: "知乎 某答主", kind: social, url: "https://<your-rsshub>/zhihu/people/activities/<id>"}
+    # 小红书用户笔记（RSSHub，反爬强、经常失效）
+    # - {name: "小红书 某博主", kind: social, url: "https://<your-rsshub>/xiaohongshu/user/<user_id>/notes"}
+    # 微信公众号（wewe-rss，基于微信读书订阅公众号）
+    # - {name: "机器之心", kind: wechat, url: "https://<your-wewe-rss>/feeds/<feed_id>.atom"}
