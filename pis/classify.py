@@ -47,10 +47,10 @@ def classify(llm: LLM, items: list[Item]) -> None:
         if it.extra.get("github"):
             hints.append(f"含 GitHub 链接 {it.extra['github']}")
         lines.append(f"[{i}] {it.title}\n" + (f"用户备注：{it.note}\n" if it.note else "") +
-                     (f"线索：{'；'.join(hints)}\n" if hints else "") + f"正文开头：{it.text[:900]}")
+                     (f"线索：{'；'.join(hints)}\n" if hints else "") + f"正文：{it.text[:6000]}")
     result: dict[int, str] = {}
     try:
-        d = llm.json(CLASSIFY_SYSTEM, "\n\n".join(lines), temperature=0.0, max_tokens=1500)
+        d = llm.json(CLASSIFY_SYSTEM, "\n\n".join(lines), temperature=0.0, max_tokens=8000)
         for x in d.get("items", []):
             if x.get("kind") in KINDS:
                 result[int(x["id"])] = x["kind"]

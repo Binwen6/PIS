@@ -35,10 +35,14 @@ class LLM:
         if as_json:
             body["response_format"] = {"type": "json_object"}
         last: Exception | None = None
-        for i in range(retries):
+        for i in range(retries + 3):    # +3: room for max_tokens step-downs
             try:
-                r = requests.post(self.url, json=body, timeout=300,
+                r = requests.post(self.url, json=body, timeout=900,
                                   headers={"Authorization": f"Bearer {self.key}"})
+                if r.status_code == 400 and "max_tokens" in r.text.lower() and body["max_tokens"] > 4096:
+                    body["max_tokens"] //= 2      # model's output cap is lower than requested: step down
+                    log.warning("max_tokens rejected (%s); retrying with %d", r.text[:120], body["max_tokens"])
+                    continue
                 if r.status_code in (400, 404) and "model" in r.text.lower() and self.fallbacks:
                     log.warning("model %s rejected (%s); falling back to %s", self.model, r.text[:120], self.fallbacks[0])
                     self.model = body["model"] = self.fallbacks.pop(0)

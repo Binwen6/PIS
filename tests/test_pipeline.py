@@ -385,5 +385,5 @@ def test_digest_degrades_gracefully():
 
     items = [(1, Item(source="inbox", title="t", url="u", text="x" * 3000))]
     d = make_digest(Flaky(), "ctx", items)
-    assert len(calls) == 2 and calls[1] < calls[0]          # retried with a compact input
+    assert len(calls) == 1 and calls[0] > 3000               # full text, no compaction
     assert d["headline"].startswith("今日摘要生成失败") and 1 in d["items_by_id"]

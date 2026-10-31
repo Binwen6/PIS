@@ -57,7 +57,7 @@ def extract(html: str, url: str = "") -> tuple[str, str, str]:
     return title, text, img
 
 
-def fetch_text(url: str, limit: int = 4000) -> tuple[str, str, str, str, str]:
+def fetch_text(url: str, limit: int = 60000) -> tuple[str, str, str, str, str]:
     """-> (title, text, og_image, arxiv_id, github owner/repo)"""
     try:
         r = http_get(url, timeout=30, retries=2)

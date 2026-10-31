@@ -214,7 +214,7 @@ def fulltext(aid: str, limit: int) -> tuple[str, str]:
         r = http_get(f"https://arxiv.org/pdf/{aid}", timeout=90, retries=2)
         if r.status_code == 200:
             reader = PdfReader(io.BytesIO(r.content))
-            txt = "\n".join((p.extract_text() or "") for p in reader.pages[:40])
+            txt = "\n".join((p.extract_text() or "") for p in reader.pages)
             if len(txt) > 3000:
                 return txt[:limit], "arXiv PDF 全文"
     except Exception as e:  # noqa: BLE001
@@ -316,7 +316,7 @@ def analyse(llm: LLM, notion: Notion, lib: str, profile: str, n: int, it: Item, 
         title = meta.get("title") or it.title
         authors = meta.get("authors") or it.authors
         abstract = meta.get("abstract") or (it.text if it.source != "inbox" else "")
-        body, basis = fulltext(aid, cfg.get("max_chars", 60000)) if aid else ("", "")
+        body, basis = fulltext(aid, cfg.get("max_chars", 150000)) if aid else ("", "")
         if not body:
             if it.source == "inbox" and it.text:
                 body, basis = it.text, "公众号/网页文章（二手解读，非论文原文）"
@@ -332,9 +332,9 @@ def analyse(llm: LLM, notion: Notion, lib: str, profile: str, n: int, it: Item, 
             if repo:
                 body, basis = f"{repo}\n\n# 介绍文章\n{it.text}", "GitHub README + 介绍文章"
         user = (f"# 读者研究背景\n{profile[:3000]}\n\n# 收藏内容（类型：{kind_label}）\n标题：{title}\n"
-                f"{note}\n# 正文（{basis}）\n{body[:cfg.get('max_chars', 60000)]}")
+                f"{note}\n# 正文（{basis}）\n{body[:cfg.get('max_chars', 150000)]}")
     try:
-        md = llm.text(system_for(kind), user, temperature=0.5, max_tokens=cfg.get("max_tokens", 8000))
+        md = llm.text(system_for(kind), user, temperature=0.5, max_tokens=cfg.get("max_tokens", 32768))
     except Exception as e:  # noqa: BLE001
         log.error("deep dive [%d] %s failed: %s", n, title[:60], e)
         return None

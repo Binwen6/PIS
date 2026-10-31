@@ -35,15 +35,15 @@ DIGEST_SYSTEM = """你是这位研究者的私人科研情报编辑，也是同�
   }],
   "threads": [{"name": "记忆中的跟进线索名", "update": "今天的新进展（带 [编号]）"}],
   "items": [{"id": 编号, "tldr": "一句话：做了什么+关键结果（≤60 字）",
-             "detail": "仅对用户收藏条目：1-2 句说明它和用户兴趣的关系（详细解析另有专页）；其他条目留空字符串"}]
+             "detail": "仅对用户收藏条目：3-4 句消化后的总结（按其类型：论文讲贡献，工具讲用途，技巧讲做法），并说明它和用户兴趣的关系；其他条目留空字符串"}]
 }
 themes 的数量与内容量匹配（一般 1-5 个）：条目很少时 1 个主题即可，绝不要把同一项工作拆成多个主题来凑数；每个条目只归入一个主题；threads 没有就给空数组；items 必须覆盖全部编号。"""
 
 
-def build_input(context: str, numbered: list[tuple[int, Item]], compact: bool = False) -> str:
+def build_input(context: str, numbered: list[tuple[int, Item]], max_chars: int = 20000) -> str:
     parts = []
     for n, it in numbered:
-        limit = (500 if compact else 1200) if it.source == "inbox" else (400 if compact else 1000)
+        limit = max_chars   # full text; the cap only guards the context window against pathological pages
         meta = [it.origin]
         if it.authors:
             meta.append(it.authors[:120])
@@ -66,19 +66,14 @@ def fallback_digest(numbered: list[tuple[int, Item]]) -> dict:
             "threads": [], "items": [{"id": n, "tldr": (it.why or it.text[:80]), "detail": ""} for n, it in numbered]}
 
 
-def make_digest(llm: LLM, context: str, numbered: list[tuple[int, Item]]) -> dict:
+def make_digest(llm: LLM, context: str, numbered: list[tuple[int, Item]], max_tokens: int = 32768) -> dict:
     if not numbered:
         d = {"headline": "过去 24 小时没有与你研究方向高度相关的新内容", "takeaways": [], "themes": [], "threads": [], "items": []}
     else:
-        d = None
-        for compact, retries in ((False, 3), (True, 2)):   # full input first, then a slimmer request
-            try:
-                d = llm.json(DIGEST_SYSTEM, build_input(context, numbered, compact), temperature=0.4,
-                             max_tokens=8000, retries=retries)
-                break
-            except Exception as e:  # noqa: BLE001
-                log.error("digest generation failed (compact=%s): %s", compact, e)
-        if d is None:
+        try:
+            d = llm.json(DIGEST_SYSTEM, build_input(context, numbered), temperature=0.4, max_tokens=max_tokens)
+        except Exception as e:  # noqa: BLE001 - an API outage must not cost the whole day's page
+            log.error("digest generation failed, publishing items only: %s", e)
             d = fallback_digest(numbered)
     for k, v in {"headline": "", "takeaways": [], "themes": [], "threads": [], "items": []}.items():
         if not isinstance(d.get(k), type(v)):

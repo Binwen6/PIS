@@ -103,7 +103,7 @@ def run(args) -> int:
     top_news = rank.select(news, fcfg.get("min_score", 6), fcfg.get("max_in_digest", 10))
 
     numbered = list(enumerate(top_papers + top_news + inbox, start=1))
-    d = make_digest(llm, context, numbered)
+    d = make_digest(llm, context, numbered, cfg["llm"].get("digest_max_tokens", 32768))
     stats = (f"arXiv/HF 共 {n_papers_raw} 篇 → 精选 {len(top_papers)} 篇；动态 {len(news)} 条 → 精选 {len(top_news)} 条；"
              f"收藏 {len(inbox)} 条 · 模型 {llm.model} · tokens 入 {llm.usage['prompt_tokens']} / 出 {llm.usage['completion_tokens']}")
 

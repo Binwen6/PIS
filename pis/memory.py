@@ -118,7 +118,7 @@ def update(llm: LLM, profile: str, mem: dict, today: date, inbox: list[Item],
     user = (f"# 长期研究画像\n{profile}\n\n# 旧记忆\n{json.dumps(old, ensure_ascii=False)}\n\n# 新信号\n"
             + "\n".join(signals))
     try:
-        new = llm.json(MEMORY_SYSTEM, user, temperature=0.2, max_tokens=4000)
+        new = llm.json(MEMORY_SYSTEM, user, temperature=0.2, max_tokens=16000)
     except Exception as e:  # noqa: BLE001
         log.warning("memory update failed, keeping old memory: %s", e)
         new = old

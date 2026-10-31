@@ -45,10 +45,10 @@ def _score_batch(llm: LLM, profile: str, batch: list[tuple[int, Item]]) -> dict[
     lines = []
     for i, it in batch:
         extra = f" | HF赞:{it.upvotes}" if it.upvotes else ""
-        lines.append(f"[{i}] ({it.origin}{extra}) {it.title}\n{it.text[:600]}")
+        lines.append(f"[{i}] ({it.origin}{extra}) {it.title}\n{it.text[:4000]}")
     user = f"# 研究画像\n{profile}\n\n# 待评分条目\n" + "\n\n".join(lines)
     try:
-        d = llm.json(SCORE_SYSTEM, user, temperature=0.0, max_tokens=4000)
+        d = llm.json(SCORE_SYSTEM, user, temperature=0.0, max_tokens=8000)
     except Exception as e:  # noqa: BLE001
         log.warning("scoring batch failed: %s", e)
         return {}
