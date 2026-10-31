@@ -262,7 +262,7 @@ def pick(numbered: list[tuple[int, Item]], cfg: dict) -> list[tuple[int, Item]]:
             it.extra["kind"] = "paper"
             papers.append((n, it))
     papers.sort(key=lambda x: -x[1].score)
-    return (inbox + papers)[: cfg.get("max_items", 6)]
+    return (inbox + papers)[: cfg.get("max_items", 15)]
 
 
 def _existing(notion: Notion, lib: str, url: str) -> str | None:
