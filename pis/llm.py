@@ -11,9 +11,10 @@ from .common import log
 
 
 class LLM:
-    def __init__(self, base_url: str, model: str, api_key: str | None = None):
+    def __init__(self, base_url: str, model: str, api_key: str | None = None, fallbacks: list[str] | None = None):
         self.url = base_url.rstrip("/") + "/chat/completions"
-        self.model = os.environ.get("DEEPSEEK_MODEL", model)
+        self.model = os.environ.get("DEEPSEEK_MODEL") or model
+        self.fallbacks = [m for m in (fallbacks or []) if m != self.model]
         self.key = api_key or os.environ["DEEPSEEK_API_KEY"]
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
@@ -30,6 +31,10 @@ class LLM:
             try:
                 r = requests.post(self.url, json=body, timeout=300,
                                   headers={"Authorization": f"Bearer {self.key}"})
+                if r.status_code in (400, 404) and "model" in r.text.lower() and self.fallbacks:
+                    log.warning("model %s rejected (%s); falling back to %s", self.model, r.text[:120], self.fallbacks[0])
+                    self.model = body["model"] = self.fallbacks.pop(0)
+                    continue
                 if r.status_code in (429, 500, 502, 503):
                     raise RuntimeError(f"DeepSeek {r.status_code}: {r.text[:200]}")
                 r.raise_for_status()

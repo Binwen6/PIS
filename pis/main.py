@@ -3,10 +3,9 @@
 Env:
   DEEPSEEK_API_KEY        required
   NOTION_TOKEN            required unless --dry-run
-  NOTION_PIS_PAGE_ID      the「PIS」page; daily pages are created under it
-  NOTION_INBOX_DB_ID      optional,「📥 Inbox」database for hand-saved links
-  NOTION_PROFILE_PAGE_ID  optional,「🧭 研究画像」page (overrides config/profile.md)
-  NOTION_MEMORY_PAGE_ID   optional,「🧠 记忆」page (dynamic interest memory, auto-maintained)
+  DEEPSEEK_MODEL          optional model override
+The PIS page comes from config/sources.yaml (notion.pis_page_id) or a title search; its sub-pages
+(🧭 研究画像 / 🧠 记忆 / 📥 Inbox) are created automatically on the first run — see bootstrap.py.
 """
 from __future__ import annotations
 
@@ -24,14 +23,13 @@ from .common import Item, log, utcnow
 from .digest import make_digest
 from .llm import LLM
 from .notion import Notion
-from . import memory, rank, render
+from . import bootstrap, memory, rank, render
 from .sources import arxiv, feeds, hf_daily, notion_inbox
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def load_profile(notion: Notion | None) -> str:
-    pid = os.environ.get("NOTION_PROFILE_PAGE_ID")
+def load_profile(notion: Notion | None, pid: str | None) -> str:
     if notion and pid:
         try:
             txt = notion.page_text(pid)
@@ -43,7 +41,8 @@ def load_profile(notion: Notion | None) -> str:
     return (ROOT / "config" / "profile.md").read_text(encoding="utf-8")
 
 
-def gather(cfg: dict, notion: Notion | None, now: datetime, today: date) -> tuple[list[Item], list[Item], list[Item]]:
+def gather(cfg: dict, notion: Notion | None, db: str | None, now: datetime,
+           today: date) -> tuple[list[Item], list[Item], list[Item]]:
     papers: list[Item] = []
     if cfg.get("arxiv", {}).get("enabled", True):
         try:
@@ -56,7 +55,6 @@ def gather(cfg: dict, notion: Notion | None, now: datetime, today: date) -> tupl
     news = feeds.fetch(cfg.get("feeds", {}).get("list", []), now, cfg.get("window_hours", 26))
 
     inbox: list[Item] = []
-    db = os.environ.get("NOTION_INBOX_DB_ID")
     if notion and db and cfg.get("notion_inbox", {}).get("enabled", True):
         try:
             inbox = notion_inbox.fetch(notion, db)
@@ -76,7 +74,8 @@ def run(args) -> int:
     if not args.dry_run and not notion:
         log.error("NOTION_TOKEN is not set (use --dry-run to only write Markdown)")
         return 2
-    parent = os.environ.get("NOTION_PIS_PAGE_ID", "")
+    ids = bootstrap.ensure(notion, cfg, ROOT) if notion else {}
+    parent = ids.get("pis", "")
     if not args.dry_run:
         existing = notion.find_child_page(parent, title)
         if existing and not args.force:
@@ -85,16 +84,16 @@ def run(args) -> int:
         if existing:
             notion.archive(existing)
 
-    profile = load_profile(notion)
-    mem_page = os.environ.get("NOTION_MEMORY_PAGE_ID")
+    profile = load_profile(notion, ids.get("profile"))
+    mem_page = ids.get("memory")
     mem = memory.load(notion, mem_page)
     ticked = memory.collect_feedback(notion, parent, today, mem) if mem_page else []
     context = f"# 研究画像（用户亲手写的长期兴趣）\n{profile}\n\n{memory.as_prompt(mem)}".strip()
     if ticked:
         context += "\n\n# 用户最近勾选想深读的条目\n" + "\n".join(f"- {t}" for t in ticked)
 
-    llm = LLM(cfg["llm"]["base_url"], cfg["llm"]["model"])
-    papers, news, inbox = gather(cfg, notion, now, today)
+    llm = LLM(cfg["llm"]["base_url"], cfg["llm"]["model"], fallbacks=cfg["llm"].get("fallback_models", []))
+    papers, news, inbox = gather(cfg, notion, ids.get("inbox"), now, today)
 
     acfg, fcfg, lcfg = cfg.get("arxiv", {}), cfg.get("feeds", {}), cfg["llm"]
     n_papers_raw = len(papers)

@@ -26,20 +26,18 @@
          Notion：PIS / 2026-10-31 / {论文精选, 动态与博客, 我的收藏}
 ```
 
-## 部署（约 15 分钟）
+## 部署
 
-1. **Notion 集成**：打开 <https://www.notion.so/profile/integrations> → New integration（Internal）→ 复制 token（`ntn_…`）。
-2. **PIS 页面**：在 Notion 新建页面「PIS」→ 右上角 `···` → Connections → 添加刚才的集成。
-3. **初始化子结构**（本地执行一次）：
-   ```bash
-   pip install -r requirements.txt
-   NOTION_TOKEN=ntn_xxx python setup_notion.py "<PIS 页面链接>"
-   ```
-   会创建「🧭 研究画像」「🧠 记忆」两个页面和「📥 Inbox」数据库，并打印 4 个 ID。
-4. **GitHub**：把本项目推到一个 **私有** 仓库 → Settings → Secrets and variables → Actions，添加 Secrets：
-   `DEEPSEEK_API_KEY`、`NOTION_TOKEN`、`NOTION_PIS_PAGE_ID`、`NOTION_PROFILE_PAGE_ID`、`NOTION_MEMORY_PAGE_ID`、`NOTION_INBOX_DB_ID`；
-   可选 Variable `DEEPSEEK_MODEL`（默认 `deepseek-chat`；DeepSeek 近期模型名变动频繁，请以官网模型列表为准）。
-5. **试跑**：Actions → *PIS daily digest* → Run workflow。之后每天自动运行。
+1. **Notion 集成**：<https://www.notion.so/profile/integrations> 新建 Internal integration，复制 token；
+   在「PIS-Personal Information Source」页面 → 右上角 `···` → Connections → 添加该集成。
+2. **GitHub Secrets**（Settings → Secrets and variables → Actions）：
+   - `DEEPSEEK_API`：DeepSeek API Key
+   - `PERSONAL_INFORMATION_SOURCE`：Notion 集成 token
+   - （可选）Variables 里加 `DEEPSEEK_MODEL` 覆盖默认的 `deepseek-flash`
+3. **首次运行**：Actions → *PIS daily digest* → Run workflow。
+   首次运行会在 PIS 页面下自动创建「🧭 研究画像」「🧠 记忆」「📥 Inbox」，然后生成当天简报。之后每天 07:30（北京时间）自动运行。
+
+PIS 页面 ID 写在 `config/sources.yaml` 的 `notion.pis_page_id`；留空则按标题搜索。
 
 本地调试（不写 Notion，只输出 Markdown 到 `out/`）：
 ```bash
@@ -64,7 +62,7 @@ DEEPSEEK_API_KEY=sk-xxx python -m pis.main --dry-run
   「获取 URL 内容」：`POST https://api.notion.com/v1/pages`，请求头
   `Authorization: Bearer <NOTION_TOKEN>`、`Notion-Version: 2022-06-28`、`Content-Type: application/json`，JSON 正文：
   ```json
-  {"parent": {"database_id": "<NOTION_INBOX_DB_ID>"},
+  {"parent": {"database_id": "<Inbox 数据库 ID：打开 Inbox 整页，链接中 ?v= 之前那 32 位>"},
    "properties": {"Name": {"title": [{"text": {"content": "<快捷指令输入>"}}]},
                   "URL": {"url": "<快捷指令输入>"}}}
   ```

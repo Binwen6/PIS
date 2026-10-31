@@ -1,17 +1,23 @@
 # PIS 信息源配置
 timezone: Asia/Shanghai
+
+notion:
+  pis_page_id: 40ad4b61-755e-80b0-a159-f34c3f246739   # 「PIS-Personal Information Source」
+  pis_page_title: PIS                                  # pis_page_id 为空时按标题搜索
 window_hours: 26          # 回看窗口（略大于 24h，防止定时任务延迟漏掉内容）
 
 llm:
   base_url: https://api.deepseek.com
-  model: deepseek-chat     # 也可以换成 deepseek-reasoner，更贵更慢
+  model: deepseek-flash    # 最新 Flash（V4.1-Flash）；可用 GitHub 仓库变量 DEEPSEEK_MODEL 覆盖
+  fallback_models: [deepseek-chat]   # 模型名被拒绝时自动回退
   score_batch_size: 40     # 相关度打分时每批多少条
   max_workers: 4
 
 arxiv:
   enabled: true
   # arXiv 每日公告 RSS，周末/节假日没有新公告属正常
-  categories: [cs.CL, cs.LG, cs.AI, cs.CV]
+  # cs.MA 多智能体 · q-bio.NC 神经与认知 · eess.AS/cs.SD 音频与听觉 · cs.HC 含部分 BCI 工作
+  categories: [cs.CL, cs.LG, cs.AI, cs.MA, cs.CV, q-bio.NC, eess.AS, cs.SD, cs.HC]
   include_cross_lists: true
   prefilter_max: 800       # 超过这个数量时先用关键词粗筛，节省 token
   min_score: 6             # 0-10，低于此分不进入摘要

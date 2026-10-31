@@ -121,10 +121,17 @@ class FakeNotion:
     def __init__(self, *a, **k):
         self.pages, self.updated, self.replaced = [], [], None
 
+    def children_pis(self):
+        return [{"id": "prof", "type": "child_page", "child_page": {"title": "🧭 研究画像"}},
+                {"id": "mem", "type": "child_page", "child_page": {"title": "🧠 记忆"}},
+                {"id": "db", "type": "child_database", "child_database": {"title": "📥 Inbox"}}]
+
     def find_child_page(self, parent, title):
         return "day-1030" if (parent, title) == ("pis", "2026-10-30") else None
 
     def children(self, bid):
+        if bid == "pis":
+            return self.children_pis()
         if bid == "mem":
             return [{"id": "tg", "type": "toggle", "toggle": {}}]
         if bid == "tg":
@@ -181,8 +188,7 @@ def test_end_to_end(monkeypatch, tmp_path):
     monkeypatch.setattr(M, "LLM", FakeLLM)
     fake = FakeNotion()
     monkeypatch.setattr(M, "Notion", lambda *a, **k: fake)
-    for k, v in {"NOTION_TOKEN": "x", "NOTION_PIS_PAGE_ID": "pis", "NOTION_INBOX_DB_ID": "db",
-                 "NOTION_PROFILE_PAGE_ID": "prof", "NOTION_MEMORY_PAGE_ID": "mem",
+    for k, v in {"NOTION_TOKEN": "x", "NOTION_PIS_PAGE_ID": "pis",
                  "DEEPSEEK_API_KEY": "k"}.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setattr(M, "ROOT", _root_copy(tmp_path))
@@ -219,3 +225,54 @@ def _root_copy(tmp):
     src = Path(__file__).resolve().parent.parent
     shutil.copytree(src / "config", tmp / "config")
     return tmp
+
+
+def test_bootstrap_creates_missing(tmp_path):
+    from pis import bootstrap
+    root = _root_copy(tmp_path)
+    created = []
+
+    class N0(FakeNotion):
+        def children(self, bid):
+            return []
+
+        def create_page(self, parent, title, blocks, emoji=""):
+            check_blocks(blocks)
+            created.append(title)
+            return "new-" + title
+
+        def req(self, method, path, json=None):
+            assert path == "/databases" and json["parent"]["page_id"] == "40ad4b61-755e-80b0-a159-f34c3f246739"
+            created.append("db")
+            return {"id": "new-db"}
+
+    import yaml
+    cfg = yaml.safe_load((root / "config" / "sources.yaml").read_text())
+    ids = bootstrap.ensure(N0(), cfg, root)
+    assert created == ["🧭 研究画像", "🧠 记忆", "db"] and ids["inbox"] == "new-db"
+
+
+def test_model_fallback(monkeypatch):
+    from pis import llm as L
+    calls = []
+
+    class R:
+        def __init__(self, code, body):
+            self.status_code, self._b, self.text = code, body, json.dumps(body)
+
+        def json(self):
+            return self._b
+
+        def raise_for_status(self):
+            pass
+
+    def post(url, json=None, **kw):
+        calls.append(json["model"])
+        if json["model"] == "deepseek-flash":
+            return R(400, {"error": {"message": "Model Not Exist"}})
+        return R(200, {"choices": [{"message": {"content": '{"ok": 1}'}}], "usage": {}})
+
+    monkeypatch.setattr(L.requests, "post", post)
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    c = L.LLM("https://x", "deepseek-flash", api_key="k", fallbacks=["deepseek-chat"])
+    assert c.json("s", "u") == {"ok": 1} and calls == ["deepseek-flash", "deepseek-chat"]

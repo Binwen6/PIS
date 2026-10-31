@@ -28,12 +28,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Build digest
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_PIS_PAGE_ID: ${{ secrets.NOTION_PIS_PAGE_ID }}
-          NOTION_INBOX_DB_ID: ${{ secrets.NOTION_INBOX_DB_ID }}
-          NOTION_PROFILE_PAGE_ID: ${{ secrets.NOTION_PROFILE_PAGE_ID }}
-          NOTION_MEMORY_PAGE_ID: ${{ secrets.NOTION_MEMORY_PAGE_ID }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API }}
+          NOTION_TOKEN: ${{ secrets.PERSONAL_INFORMATION_SOURCE }}   # Notion 集成 token
           DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
         run: python -m pis.main ${{ inputs.force && '--force' || '' }}
       - uses: actions/upload-artifact@v4
