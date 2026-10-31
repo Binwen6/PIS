@@ -205,7 +205,7 @@ class FakeNotion:
         self.pages.append((parent, title, blocks))
         return f"page-{len(self.pages)}"
 
-    def query_db(self, db, f=None):
+    def query_db(self, db, f=None, sorts=None):
         if db == "lib":
             return []
         return [{"id": "row1", "properties": {
@@ -419,45 +419,74 @@ def test_sanitize_style():
 
 
 class _IdLLM:
+    def __init__(self, verdict=None):
+        self.verdict = verdict
+
     def json(self, system, user, **kw):
+        if "候选论文" in system:
+            assert "Adaptive Video Tokens via Information" in user           # candidate abstracts are shown
+            return self.verdict
         assert "英文原标题" in system
-        return {"is_paper": True, "title": "Context Is Weights: Compiling Prompts into Rank-1 Patches",
-                "authors": ["A. Smith"], "venue": "ICML 2026", "arxiv_id": ""}
+        return {"is_paper": True, "title": "InfoTok: Information-Theoretic Adaptive Video Tokenization",
+                "method_name": "InfoTok", "authors": ["A. Smith"], "keywords": ["video tokenizer", "ELBO"],
+                "venue": "ICLR 2026", "arxiv_id": ""}
 
 
-def test_resolve_via_arxiv(monkeypatch):
+ATOM = b"""<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry><id>http://arxiv.org/abs/2610.11111v1</id><title>Unrelated Paper About Cats</title><summary>cats</summary></entry>
+  <entry><id>http://arxiv.org/abs/2610.77777v2</id><title>Adaptive Video Tokens via Information
+    Theory</title><summary>We allocate tokens by ELBO.</summary></entry></feed>"""
+
+
+def _get_no_s2(url, **kw):
+    if "export.arxiv.org" in url:
+        return Resp(ATOM)
+    return Resp(js={"data": [], "notes": []})
+
+
+def test_resolve_exact_title(monkeypatch):
     from pis import resolve
     from pis.common import Item
-    atom = b"""<feed xmlns="http://www.w3.org/2005/Atom">
-      <entry><id>http://arxiv.org/abs/2610.11111v1</id><title>Something Else Entirely</title></entry>
-      <entry><id>http://arxiv.org/abs/2610.77777v2</id><title>Context is Weights: Compiling
-        Prompts into Rank-1 Patches</title></entry></feed>"""
-    monkeypatch.setattr(common.requests, "get", lambda url, **kw: Resp(atom))
-    hit = resolve.find_paper(_IdLLM(), Item(source="inbox", title="上下文就是权重", url="u", text="文章正文"))
+    atom = ATOM.replace(b"Adaptive Video Tokens via Information\n    Theory",
+                        b"InfoTok: Information-Theoretic Adaptive Video Tokenization")
+    monkeypatch.setattr(common.requests, "get", lambda url, **kw: Resp(atom) if "arxiv" in url else Resp(js={"data": []}))
+    hit = resolve.find_paper(_IdLLM(), Item(source="inbox", title="香农", url="u", text="文章正文"))
     assert hit["arxiv_id"] == "2610.77777"
 
 
-def test_resolve_falls_back_to_semantic_scholar(monkeypatch):
+def test_resolve_verified_by_model(monkeypatch):
+    """Guessed title differs from the real one: the model picks the right candidate from the abstracts."""
+    from pis import resolve
+    from pis.common import Item
+    monkeypatch.setattr(common.requests, "get", _get_no_s2)
+    hit = resolve.find_paper(_IdLLM({"match": 0, "confidence": 0.9, "why": "方法和数字一致"}),
+                             Item(source="inbox", title="香农", url="u", text="x"))
+    assert hit and hit["arxiv_id"] == "2610.77777"      # candidate list is sorted by title similarity
+
+
+def test_resolve_rejects_low_confidence(monkeypatch):
+    from pis import resolve
+    from pis.common import Item
+    monkeypatch.setattr(common.requests, "get", _get_no_s2)
+    assert resolve.find_paper(_IdLLM({"match": 0, "confidence": 0.4}), Item(source="inbox", title="t", url="u", text="x")) is None
+
+
+def test_resolve_openreview_pdf(monkeypatch):
     from pis import resolve
     from pis.common import Item
 
     def get(url, **kw):
+        if "openreview" in url:
+            return Resp(js={"notes": [{"forum": "abc", "content": {
+                "title": {"value": "InfoTok: Information-Theoretic Adaptive Video Tokenization"},
+                "abstract": {"value": "Adaptive Video Tokens via Information"}}}]})
         if "export.arxiv.org" in url:
             return Resp(b"<feed xmlns='http://www.w3.org/2005/Atom'></feed>")
-        return Resp(js={"data": [{"title": "Context Is Weights: Compiling Prompts Into Rank-1 Patches",
-                                  "externalIds": {"DOI": "x"}, "openAccessPdf": {"url": "https://openreview.net/pdf?id=abc"},
-                                  "url": "https://www.semanticscholar.org/paper/abc"}]})
+        return Resp(js={"data": []})
     monkeypatch.setattr(common.requests, "get", get)
     hit = resolve.find_paper(_IdLLM(), Item(source="inbox", title="t", url="u", text="x"))
-    assert hit["pdf_url"] == "https://openreview.net/pdf?id=abc" and not hit["arxiv_id"]
-
-
-def test_resolve_rejects_wrong_title(monkeypatch):
-    from pis import resolve
-    from pis.common import Item
-    atom = b"<feed xmlns='http://www.w3.org/2005/Atom'><entry><id>http://arxiv.org/abs/2610.11111v1</id><title>Unrelated Paper About Cats</title></entry></feed>"
-    monkeypatch.setattr(common.requests, "get", lambda url, **kw: Resp(atom, js={"data": []}))
-    assert resolve.find_paper(_IdLLM(), Item(source="inbox", title="t", url="u", text="x")) is None
+    assert hit == {"arxiv_id": None, "pdf_url": "https://openreview.net/pdf?id=abc",
+                   "title": "InfoTok: Information-Theoretic Adaptive Video Tokenization"}
 
 
 def test_canonical_wechat_url():

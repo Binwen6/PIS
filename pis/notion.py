@@ -91,12 +91,14 @@ class Notion:
         return "\n".join(lines).strip()
 
     # ---- databases ------------------------------------------------------
-    def query_db(self, db_id: str, filter_: dict | None = None) -> list[dict]:
+    def query_db(self, db_id: str, filter_: dict | None = None, sorts: list | None = None) -> list[dict]:
         out, cursor = [], None
         while True:
             body: dict = {"page_size": 100}
             if filter_:
                 body["filter"] = filter_
+            if sorts:
+                body["sorts"] = sorts
             if cursor:
                 body["start_cursor"] = cursor
             d = self.req("POST", f"/databases/{db_id}/query", json=body)
