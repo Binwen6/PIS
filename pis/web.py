@@ -8,6 +8,12 @@ from bs4 import BeautifulSoup
 from .common import http_get, log
 
 
+def canonical_url(url: str) -> str:
+    """Strip tracking parameters from WeChat article links (mp.weixin.qq.com/s/<id>?from=...&scene=...)."""
+    m = re.match(r"(https?://mp\.weixin\.qq\.com/s/[A-Za-z0-9_-]+)(?:[?#].*)?$", (url or "").strip())
+    return m.group(1) if m else (url or "").strip()
+
+
 _ARXIV = re.compile(r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})|arXiv[:：\s]\s*(\d{4}\.\d{4,5})", re.I)
 
 

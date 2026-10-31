@@ -269,8 +269,11 @@ def pick(numbered: list[tuple[int, Item]], cfg: dict) -> list[tuple[int, Item]]:
 
 
 def _existing(notion: Notion, lib: str, url: str) -> str | None:
-    try:
-        rows = notion.query_db(lib, {"property": "URL", "url": {"equals": url}})
+    from .web import canonical_url
+    url = canonical_url(url)
+    try:   # starts_with also matches entries saved earlier with tracking parameters
+        rows = notion.query_db(lib, {"property": "URL", "url": {"starts_with": url}})
+        rows = [r for r in rows if canonical_url((r.get("properties", {}).get("URL", {}) or {}).get("url") or "") == url]
         return rows[0]["id"] if rows else None
     except Exception as e:  # noqa: BLE001
         log.warning("library lookup failed: %s", e)

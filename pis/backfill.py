@@ -21,7 +21,7 @@ import yaml
 from .common import GitHubAnnotations, Item, log, utcnow
 from .llm import LLM
 from .notion import Notion
-from .web import fetch_text
+from .web import canonical_url, fetch_text
 from . import bootstrap, classify, deepdive, notion as N
 from .main import ROOT, load_profile
 
@@ -33,9 +33,9 @@ def _inbox_note(notion: Notion, inbox: str | None, url: str) -> tuple[str, str |
     if not inbox:
         return "", None
     try:
-        for row in notion.query_db(inbox, {"property": "URL", "url": {"equals": url}}):
+        for row in notion.query_db(inbox, {"property": "URL", "url": {"starts_with": url}}):
             props = row["properties"]
-            if (props.get("URL", {}).get("url") or "") == url:
+            if canonical_url(props.get("URL", {}).get("url") or "") == url:
                 note = "".join(t.get("plain_text", "") for t in props.get("Note", {}).get("rich_text", []))
                 title = "".join(t.get("plain_text", "") for t in props.get("Name", {}).get("title", []))
                 return note, (title if title and not title.startswith("http") else None)
@@ -50,6 +50,7 @@ def to_item(token: str, notion: Notion, inbox: str | None) -> Item:
         aid = deepdive.find_arxiv_id(token) or token.split("v")[0]
         return Item(source="arxiv", title=aid, url=f"https://arxiv.org/abs/{aid}", origin="arXiv",
                     extra={"arxiv_id": aid, "kind": "paper"})
+    token = canonical_url(token)
     note, saved_title = _inbox_note(notion, inbox, token)
     title, text, img, aid, gh = fetch_text(token)
     return Item(source="inbox", title=saved_title or title or token, url=token, text=text, note=note,

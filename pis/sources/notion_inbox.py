@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from ..common import Item, log
 from ..notion import Notion
-from ..web import fetch_text
+from ..web import canonical_url, fetch_text
 
 
 def _plain(prop: dict) -> str:
@@ -27,7 +27,7 @@ def fetch(notion: Notion, db_id: str) -> list[Item]:
     for row in rows:
         props = row["properties"]
         name = _plain(next((p for p in props.values() if p["type"] == "title"), {}))
-        url = _plain(props.get("URL", {})) or (name if name.startswith("http") else "")
+        url = canonical_url(_plain(props.get("URL", {})) or (name if name.startswith("http") else ""))
         note = _plain(props.get("Note", {}))
         if not url:
             continue

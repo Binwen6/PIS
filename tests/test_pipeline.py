@@ -458,3 +458,9 @@ def test_resolve_rejects_wrong_title(monkeypatch):
     atom = b"<feed xmlns='http://www.w3.org/2005/Atom'><entry><id>http://arxiv.org/abs/2610.11111v1</id><title>Unrelated Paper About Cats</title></entry></feed>"
     monkeypatch.setattr(common.requests, "get", lambda url, **kw: Resp(atom, js={"data": []}))
     assert resolve.find_paper(_IdLLM(), Item(source="inbox", title="t", url="u", text="x")) is None
+
+
+def test_canonical_wechat_url():
+    from pis.web import canonical_url
+    assert canonical_url("https://mp.weixin.qq.com/s/0Hz9v_KW-iv?from=singlemessage&scene=1") == "https://mp.weixin.qq.com/s/0Hz9v_KW-iv"
+    assert canonical_url("https://arxiv.org/abs/2610.1?x=1") == "https://arxiv.org/abs/2610.1?x=1"
