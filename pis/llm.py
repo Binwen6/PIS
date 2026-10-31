@@ -19,13 +19,20 @@ class LLM:
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
     def json(self, system: str, user: str, *, temperature: float = 0.3, max_tokens: int = 8000) -> dict:
+        return self._chat(system, user, temperature, max_tokens, as_json=True)
+
+    def text(self, system: str, user: str, *, temperature: float = 0.5, max_tokens: int = 8000) -> str:
+        return self._chat(system, user, temperature, max_tokens, as_json=False)
+
+    def _chat(self, system: str, user: str, temperature: float, max_tokens: int, as_json: bool):
         body = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
         }
+        if as_json:
+            body["response_format"] = {"type": "json_object"}
         last: Exception | None = None
         for i in range(4):
             try:
@@ -42,6 +49,10 @@ class LLM:
                 for k in self.usage:
                     self.usage[k] += d.get("usage", {}).get(k, 0)
                 content = d["choices"][0]["message"]["content"]
+                if not as_json:
+                    if len(content.strip()) < 200:
+                        raise RuntimeError("empty completion")
+                    return content
                 return json.loads(content)
             except (requests.RequestException, RuntimeError, json.JSONDecodeError, KeyError) as e:
                 last = e

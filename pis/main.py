@@ -23,7 +23,7 @@ from .common import Item, log, utcnow
 from .digest import make_digest
 from .llm import LLM
 from .notion import Notion
-from . import bootstrap, memory, rank, render
+from . import bootstrap, deepdive, memory, rank, render
 from .sources import arxiv, feeds, hf_daily, notion_inbox
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -117,8 +117,18 @@ def run(args) -> int:
         print(md)
         return 0
 
-    page_id = notion.create_page(parent, title, render.main_blocks(title, d, numbered, stats), emoji="📰")
-    for sub_title, emoji, blocks in render.group_pages(numbered, d):
+    deep: dict[int, str] = {}
+    dcfg = cfg.get("deep_dive", {})
+    if dcfg.get("enabled", True) and ids.get("library"):
+        try:
+            deep = deepdive.run(llm, notion, ids["library"], profile, numbered, today, dcfg)
+        except Exception as e:  # noqa: BLE001 - deep dives are a bonus; never lose the digest
+            log.error("deep dives failed: %s", e)
+    stats = (stats.split(" · tokens")[0] + f" · 深度解析 {len(deep)} 篇 · tokens 入 {llm.usage['prompt_tokens']}"
+             f" / 出 {llm.usage['completion_tokens']}")
+
+    page_id = notion.create_page(parent, title, render.main_blocks(title, d, numbered, stats, deep), emoji="📰")
+    for sub_title, emoji, blocks in render.group_pages(numbered, d, deep):
         notion.create_page(page_id, sub_title, blocks, emoji=emoji)
     notion_inbox.mark_processed(notion, inbox)
 

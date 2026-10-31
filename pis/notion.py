@@ -105,14 +105,24 @@ class Notion:
                 return out
             cursor = d["next_cursor"]
 
+    def create_db_page(self, db_id: str, props: dict, blocks: list[dict], emoji: str = "📄") -> str:
+        page = self.req("POST", "/pages", json={
+            "parent": {"database_id": db_id},
+            "icon": {"type": "emoji", "emoji": emoji},
+            "properties": props,
+            "children": blocks[:100],
+        })
+        self.append(page["id"], blocks[100:])
+        return page["id"]
+
     def update_props(self, page_id: str, props: dict) -> None:
         self.req("PATCH", f"/pages/{page_id}", json={"properties": props})
 
 
 # ---- block builders --------------------------------------------------------
 _CITE = re.compile(r"\[(\d+(?:\s*[,，]\s*\d+)*)\]")
-# inline syntax the LLM may use: **bold**, `code`, [3] / [2,5] citations
-_INLINE = re.compile(r"\*\*(.+?)\*\*|`([^`]+)`|\[(\d+(?:\s*[,，]\s*\d+)*)\]")
+# inline syntax the LLM may use: **bold**, `code`, [3] / [2,5] citations, $latex$
+_INLINE = re.compile(r"\*\*(.+?)\*\*|`([^`]+)`|\[(\d+(?:\s*[,，]\s*\d+)*)\]|(?<![\$\\])\$([^$\n]+?)\$(?!\$)")
 
 
 def rich(text: str, *, link: str | None = None, bold: bool = False, color: str = "default",
@@ -139,6 +149,8 @@ def rich_with_citations(text: str, links: dict[int, str], color: str = "default"
             out += rich(m.group(1), bold=True, color=color)
         elif m.group(2):
             out += rich(m.group(2), code=True)
+        elif m.group(4):
+            out.append({"type": "equation", "equation": {"expression": m.group(4).strip()[:1000]}})
         else:
             nums = [int(n) for n in re.split(r"\s*[,，]\s*", m.group(3))]
             out += rich("[", color=color)
@@ -217,3 +229,87 @@ def table(header: list[str], rows: list[list[list[dict]]]) -> dict:
 
 def divider() -> dict:
     return {"object": "block", "type": "divider", "divider": {}}
+
+
+def equation(expr: str) -> dict:
+    return {"object": "block", "type": "equation", "equation": {"expression": expr.strip()[:1000]}}
+
+
+def link_to_page(page_id: str) -> dict:
+    return {"object": "block", "type": "link_to_page", "link_to_page": {"type": "page_id", "page_id": page_id}}
+
+
+def numbered(rt: list[dict]) -> dict:
+    return _block("numbered_list_item", rt)
+
+
+_NUM = re.compile(r"^\d+[.)、]\s+")
+
+
+def md_to_blocks(md: str) -> list[dict]:
+    """Small Markdown -> Notion converter for LLM-written long-form text.
+
+    Supports #/##/### headings, paragraphs, - / 1. lists, > quotes, ---, ``` code fences,
+    $$ display math $$ (single- or multi-line) and inline **bold** / `code` / $math$.
+    """
+    inline = lambda t: rich_with_citations(t, {})  # noqa: E731
+    blocks: list[dict] = []
+    para: list[str] = []
+
+    def flush():
+        if para:
+            blocks.append(paragraph(inline(" ".join(para))))
+            para.clear()
+
+    lines = (md or "").splitlines()
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        s = raw.strip()
+        if s.startswith("```"):
+            flush()
+            lang, buf = s[3:].strip() or "plain text", []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                buf.append(lines[i])
+                i += 1
+            blocks.append(code("\n".join(buf), lang if lang in ("python", "mermaid", "json", "bash", "latex") else "plain text"))
+        elif s.startswith("$$"):
+            flush()
+            body = s[2:]
+            if body.endswith("$$") and len(body) >= 2:
+                expr = body[:-2]
+            else:
+                buf = [body]
+                i += 1
+                while i < len(lines) and not lines[i].strip().endswith("$$"):
+                    buf.append(lines[i])
+                    i += 1
+                if i < len(lines):
+                    buf.append(lines[i].strip()[:-2])
+                expr = "\n".join(buf)
+            if expr.strip():
+                blocks.append(equation(expr))
+        elif not s:
+            flush()
+        elif s.startswith("#"):
+            flush()
+            level = min(max(len(s) - len(s.lstrip("#")), 2), 3)   # '#' -> h2, '###+' -> h3
+            blocks.append(_block(f"heading_{level}", inline(s.lstrip("#").strip())))
+        elif s in ("---", "***", "___"):
+            flush()
+            blocks.append(divider())
+        elif s.startswith(("- ", "* ", "• ")):
+            flush()
+            blocks.append(bullet(inline(s[2:].strip())))
+        elif _NUM.match(s):
+            flush()
+            blocks.append(numbered(inline(_NUM.sub("", s))))
+        elif s.startswith(">"):
+            flush()
+            blocks.append(quote(inline(s.lstrip("> ").strip())))
+        else:
+            para.append(s)
+        i += 1
+    flush()
+    return blocks

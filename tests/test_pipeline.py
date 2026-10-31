@@ -45,7 +45,7 @@ def blog_rss():
 
 
 WECHAT_HTML = """<html><head><meta property="og:title" content="og"></head><body>
-<h1 id="activity-name">公众号：Agent 评测新基准</h1><div id="js_content"><p>本文介绍了一个新的 Agent 评测基准，""" + "内容" * 50 + """</p></div></body></html>"""
+<h1 id="activity-name">公众号：Agent 评测新基准</h1><div id="js_content"><p>本文介绍了一个新的 Agent 评测基准，""" + "内容" * 50 + """</p><a href="https://arxiv.org/abs/2610.55555">论文</a></div></body></html>"""
 
 
 class Resp:
@@ -69,6 +69,12 @@ def fake_get(url, **kw):
         return Resp(js=HF if url.endswith("10-31") else [])
     if "mp.weixin.qq.com" in url:
         return Resp(text=WECHAT_HTML)
+    if "arxiv.org/abs/" in url:
+        return Resp(text='<meta name="citation_title" content="Latent Agents"><meta name="citation_author" content="Doe, Jane">'
+                         '<meta name="citation_abstract" content="We let agents read each other\'s hidden states.">')
+    if "arxiv.org/html/" in url:
+        return Resp(text='<article class="ltx_document"><h2>Method</h2><p>We align ' + "x " * 2000 +
+                         '<math alttext="z_a = R z_b"></math></p><section class="ltx_bibliography"><p>REFS</p></section></article>')
     if "fail" in url:
         return Resp(status=404)
     return Resp(blog_rss())
@@ -77,6 +83,12 @@ def fake_get(url, **kw):
 class FakeLLM:
     def __init__(self, *a, **k):
         self.model, self.usage = "fake", {"prompt_tokens": 1, "completion_tokens": 1}
+
+    def text(self, system, user, **kw):
+        assert "深度解读" in system and "## 12. Follow-up Idea" in system
+        assert "$z_a = R z_b$" in user and "REFS" not in user          # LaTeX kept, bibliography dropped
+        self.deep_calls = getattr(self, "deep_calls", 0) + 1
+        return "## 1. 研究问题与价值\n读取搭档的 $h_t$ 隐状态。\n$$\n\\min_R \\|A-RB\\|\n$$\n- 要点\n" + "正文" * 100
 
     def json(self, system, user, **kw):
         body = user.split("# 待评分条目")[-1].split("# 今日条目")[-1]
@@ -107,7 +119,7 @@ def check_blocks(blocks, depth=0):
         data = b[b["type"]]
         rts = [data.get("rich_text", [])] + [c for r in data.get("cells", []) for c in [r]]
         for rt in rts:
-            assert len(rt) <= 100 and all(len(t["text"]["content"]) <= 2000 for t in rt)
+            assert len(rt) <= 100 and all(len(t.get("text", {}).get("content", "")) <= 2000 for t in rt)
         kids = data.get("children", [])
         assert len(kids) <= 100
         if kids:
@@ -120,12 +132,19 @@ MEM_JSON = json.dumps({"interests": [], "threads": [{"name": "RLVR for agents", 
 
 class FakeNotion:
     def __init__(self, *a, **k):
-        self.pages, self.updated, self.replaced = [], [], None
+        self.pages, self.updated, self.replaced, self.db_pages = [], [], None, []
 
     def children_pis(self):
         return [{"id": "prof", "type": "child_page", "child_page": {"title": "研究画像"}},
                 {"id": "mem", "type": "child_page", "child_page": {"title": "🧠 记忆"}},   # legacy title -> renamed
-                {"id": "db", "type": "child_database", "child_database": {"title": "Inbox"}}]
+                {"id": "db", "type": "child_database", "child_database": {"title": "Inbox"}},
+                {"id": "lib", "type": "child_database", "child_database": {"title": "论文库"}}]
+
+    def create_db_page(self, db, props, blocks, emoji=""):
+        check_blocks(blocks)
+        json.dumps(blocks)
+        self.db_pages.append((db, props, blocks))
+        return f"deep-{len(self.db_pages)}"
 
     def req(self, method, path, json=None):
         assert (method, path) == ("PATCH", "/pages/mem") and json["properties"]["title"]["title"][0]["text"]["content"] == "记忆"
@@ -165,6 +184,8 @@ class FakeNotion:
         return f"page-{len(self.pages)}"
 
     def query_db(self, db, f=None):
+        if db == "lib":
+            return []
         return [{"id": "row1", "properties": {
             "Name": {"type": "title", "title": [{"plain_text": "https://mp.weixin.qq.com/s/abc"}]},
             "URL": {"type": "url", "url": None},
@@ -221,6 +242,17 @@ def test_end_to_end(monkeypatch, tmp_path):
     assert mem["recent_headlines"] == ["2026-10-30：昨天头条", "2026-10-31：RLVR 走向 Agent"]
     assert fake.renamed
     assert sum(b["type"] == "bookmark" for b in main) == 1    # same key item is not bookmarked twice
+    # deep dives: inbox article links an arXiv paper -> analysed from full text; linked under its theme
+    assert len(fake.db_pages) == 3                       # inbox paper + two papers scored >= 8
+    i, (db, props, dblocks) = next((i, p) for i, p in enumerate(fake.db_pages)
+                                  if p[1]["URL"]["url"] == "https://arxiv.org/abs/2610.55555")
+    assert db == "lib"
+    assert props["Name"]["title"][0]["text"]["content"] == "Latent Agents"
+    assert any(b["type"] == "equation" for b in dblocks)
+    assert any(t["type"] == "equation" for b in dblocks if b["type"] == "paragraph" for t in b["paragraph"]["rich_text"])
+    links = [b["link_to_page"]["page_id"] for b in main if b["type"] == "link_to_page"]
+    assert f"deep-{i + 1}" in links, links
+    assert any(k["type"] == "link_to_page" for b in fake.pages[3][2] if b["type"] == "to_do" for k in b["to_do"].get("children", []))
     assert fake.updated and fake.updated[0][1]["Processed"]["checkbox"] is True
     assert "Agent 评测新基准" in fake.updated[0][1]["Name"]["title"][0]["text"]["content"]
     md = (M.ROOT / "out" / "2026-10-31.md").read_text()
@@ -251,13 +283,13 @@ def test_bootstrap_creates_missing(tmp_path):
 
         def req(self, method, path, json=None):
             assert path == "/databases" and json["parent"]["page_id"] == "40ad4b61-755e-80b0-a159-f34c3f246739"
-            created.append("db")
-            return {"id": "new-db"}
+            created.append(json["title"][0]["text"]["content"])
+            return {"id": "new-" + json["title"][0]["text"]["content"]}
 
     import yaml
     cfg = yaml.safe_load((root / "config" / "sources.yaml").read_text())
     ids = bootstrap.ensure(N0(), cfg, root)
-    assert created == ["研究画像", "记忆", "db"] and ids["inbox"] == "new-db"
+    assert created == ["研究画像", "记忆", "Inbox", "论文库"] and ids["library"] == "new-论文库"
 
 
 def test_model_fallback(monkeypatch):

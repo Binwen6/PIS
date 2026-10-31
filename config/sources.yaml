@@ -23,6 +23,16 @@ arxiv:
   min_score: 6             # 0-10，低于此分不进入摘要
   max_in_digest: 15
 
+deep_dive:
+  enabled: true            # 12 问深度解析（读 arXiv 全文），写入「论文库」并挂在每日主题下
+  min_score: 8             # 论文相关度 ≥ 此分才做深度解析
+  include_inbox: true      # 你收藏的文章：含 arXiv 链接则解读原论文，否则解读文章本身
+  min_article_chars: 1500  # 不含 arXiv 链接的收藏，正文至少这么长才解读
+  max_items: 6             # 每天最多几篇（收藏优先，其次按相关度）
+  max_chars: 60000         # 送入模型的全文上限（字符）
+  max_tokens: 8000
+  workers: 3
+
 huggingface_daily:
   enabled: true            # HF Daily Papers：社区热度信号（upvotes）
 

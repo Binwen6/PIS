@@ -48,7 +48,9 @@ def mermaid(date_title: str, d: dict, items: dict[int, Item]) -> str:
     return "\n".join(lines)
 
 
-def main_blocks(date_title: str, d: dict, numbered: list[tuple[int, Item]], stats: str) -> list[dict]:
+def main_blocks(date_title: str, d: dict, numbered: list[tuple[int, Item]], stats: str,
+                deep: dict[int, str] | None = None) -> list[dict]:
+    deep = deep or {}
     items = dict(numbered)
     links = {n: it.url for n, it in numbered}
     cite = lambda t, **kw: N.rich_with_citations(t, links, **kw)  # noqa: E731
@@ -66,6 +68,7 @@ def main_blocks(date_title: str, d: dict, numbered: list[tuple[int, Item]], stat
     for th in d.get("themes", []):
         blocks.append(N.heading(f"{th.get('emoji', '')} {th.get('title', '')}".strip(), 2))
         blocks.append(N.paragraph(cite(th.get("body", ""))))
+        blocks += [N.link_to_page(deep[r]) for r in th.get("refs", []) if r in deep]
         if th.get("so_what"):
             blocks.append(N.quote(N.rich("💬 对你：", bold=True) + cite(th["so_what"]), color="brown"))
         key = items.get(th.get("key_ref"))
@@ -92,9 +95,11 @@ def main_blocks(date_title: str, d: dict, numbered: list[tuple[int, Item]], stat
     return blocks
 
 
-def item_blocks(n: int, it: Item, d: dict) -> list[dict]:
+def item_blocks(n: int, it: Item, d: dict, deep: dict[int, str] | None = None) -> list[dict]:
     info = d.get("items_by_id", {}).get(n, {})
     kids = []
+    if deep and n in deep:
+        kids.append(N.link_to_page(deep[n]))
     if info.get("tldr"):
         kids.append(N.paragraph(N.rich(info["tldr"])))
     if info.get("detail"):
@@ -111,7 +116,8 @@ def item_blocks(n: int, it: Item, d: dict) -> list[dict]:
     return [N.todo(head, kids)]
 
 
-def group_pages(numbered: list[tuple[int, Item]], d: dict) -> list[tuple[str, str, list[dict]]]:
+def group_pages(numbered: list[tuple[int, Item]], d: dict,
+                deep: dict[int, str] | None = None) -> list[tuple[str, str, list[dict]]]:
     pages = []
     for _, title, pred in GROUPS:
         rows = [(n, it) for n, it in numbered if pred(it)]
@@ -119,7 +125,7 @@ def group_pages(numbered: list[tuple[int, Item]], d: dict) -> list[tuple[str, st
             continue
         blocks: list[dict] = [N.callout(N.rich("☑ 勾选 = 想深读 / 感兴趣，这会成为你的兴趣信号。"), "🎯", "gray_background")]
         for n, it in rows:
-            blocks += item_blocks(n, it, d)
+            blocks += item_blocks(n, it, d, deep)
         emoji, name = title.split(" ", 1)
         pages.append((f"{name}（{len(rows)}）", emoji, blocks))
     return pages

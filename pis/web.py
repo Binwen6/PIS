@@ -1,9 +1,19 @@
 """Fetch a web page and extract readable title + text (special-cases 微信公众号)."""
 from __future__ import annotations
 
+import re
+
 from bs4 import BeautifulSoup
 
 from .common import http_get, log
+
+
+_ARXIV = re.compile(r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})|arXiv[:：\s]\s*(\d{4}\.\d{4,5})", re.I)
+
+
+def arxiv_id_in(html: str) -> str:
+    m = _ARXIV.search(html or "")
+    return (m.group(1) or m.group(2)) if m else ""
 
 
 def extract(html: str, url: str = "") -> tuple[str, str, str]:
@@ -32,14 +42,15 @@ def extract(html: str, url: str = "") -> tuple[str, str, str]:
     return title, text, img
 
 
-def fetch_text(url: str, limit: int = 4000) -> tuple[str, str, str]:
+def fetch_text(url: str, limit: int = 4000) -> tuple[str, str, str, str]:
+    """-> (title, text, og_image, arxiv_id)"""
     try:
         r = http_get(url, timeout=30, retries=2)
         if r.status_code != 200:
-            return "", "", ""
+            return "", "", "", ""
         r.encoding = r.apparent_encoding or r.encoding
         title, text, img = extract(r.text, url)
-        return title, text[:limit], img
+        return title, text[:limit], img, arxiv_id_in(r.text)
     except Exception as e:  # noqa: BLE001
         log.warning("fetch %s failed: %s", url, e)
-        return "", "", ""
+        return "", "", "", ""

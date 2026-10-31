@@ -4,6 +4,7 @@
   ├── 🧭 研究画像   (filled from config/profile.md on first run, then edited by you)
   ├── 🧠 记忆       (auto-maintained)
   ├── 📥 Inbox      (database: Name · URL · Note · Processed)
+  ├── 📚 论文库     (database: one 🔬 deep-dive page per paper, accumulates over time)
   └── 2026-10-31 …  (daily pages)
 
 IDs can be overridden with NOTION_PIS_PAGE_ID / NOTION_PROFILE_PAGE_ID / NOTION_MEMORY_PAGE_ID / NOTION_INBOX_DB_ID.
@@ -18,7 +19,8 @@ from .notion import Notion
 from . import notion as N
 
 PROFILE_TITLE, MEMORY_TITLE, INBOX_TITLE = "研究画像", "记忆", "Inbox"   # emoji lives in the page icon
-LEGACY = {PROFILE_TITLE: "🧭 研究画像", MEMORY_TITLE: "🧠 记忆", INBOX_TITLE: "📥 Inbox"}
+LIBRARY_TITLE = "论文库"
+LEGACY = {PROFILE_TITLE: "🧭 研究画像", MEMORY_TITLE: "🧠 记忆", INBOX_TITLE: "📥 Inbox", LIBRARY_TITLE: "📚 论文库"}
 
 ACCESS_HINT = ("无法访问 PIS 页面：请在 Notion 打开该页面 → 右上角 ··· → Connections（连接）→ 添加你的集成，"
                "并确认 GitHub Secret 中的 token 属于这个集成。")
@@ -91,6 +93,13 @@ def ensure(notion: Notion, cfg: dict, root: Path) -> dict[str, str]:
         "title": [{"type": "text", "text": {"content": INBOX_TITLE}}],
         "properties": {"Name": {"title": {}}, "URL": {"url": {}}, "Note": {"rich_text": {}},
                        "Processed": {"checkbox": {}}},
+    })["id"]
+    ids["library"] = existing(dbs, LIBRARY_TITLE, "db") or notion.req("POST", "/databases", json={
+        "parent": {"type": "page_id", "page_id": pis},
+        "icon": {"type": "emoji", "emoji": "📚"},
+        "title": [{"type": "text", "text": {"content": LIBRARY_TITLE}}],
+        "properties": {"Name": {"title": {}}, "URL": {"url": {}}, "日期": {"date": {}},
+                       "来源": {"select": {}}, "相关度": {"number": {}}, "已读": {"checkbox": {}}},
     })["id"]
     log.info("Notion structure ready: %s", ids)
     return ids
