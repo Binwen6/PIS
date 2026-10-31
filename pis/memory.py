@@ -28,7 +28,7 @@ MEMORY_SYSTEM = """你负责维护一位科研人员的「动态兴趣记忆」�
                  "evidence": "最近的依据（≤40字）", "last_seen": "YYYY-MM-DD"}],
   "threads": [{"name": "值得持续跟进的线索（如某个方法路线、某个团队的系列工作、某个争论）",
                "summary": "目前进展（≤80字）", "last_seen": "YYYY-MM-DD"}],
-  "preferences": ["阅读/内容偏好，例如：偏好有开源代码与扎实实验的工作"],
+  "preferences": ["阅读/内容偏好，例如：偏好有开源代码与扎实实验的工作；常收藏 AI 工作流技巧"],
   "notes": "一句话描述用户近期关注重心的变化"
 }
 规则：
@@ -107,7 +107,8 @@ def update(llm: LLM, profile: str, mem: dict, today: date, inbox: list[Item],
     signals = [f"今天日期：{today.isoformat()}"]
     if inbox:
         signals.append("## 用户今天主动收藏的内容（强信号）")
-        signals += [f"- {it.title}" + (f"（用户备注：{it.note}）" if it.note else "") for it in inbox]
+        from .classify import label
+        signals += [f"- [{label(it)}] {it.title}" + (f"（用户备注：{it.note}）" if it.note else "") for it in inbox]
     if ticked:
         signals.append("## 用户在前几天的推送中勾选了“想深读”（强信号）")
         signals += [f"- {t}" for t in ticked]

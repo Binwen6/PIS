@@ -57,5 +57,18 @@ def http_get(url: str, *, timeout: int = 60, retries: int = 3, **kw) -> requests
     raise last  # type: ignore[misc]
 
 
+class GitHubAnnotations(logging.Handler):
+    """In GitHub Actions, surface warnings/errors as run annotations (readable via the REST API)."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = self.format(record)
+        if record.exc_info:
+            import traceback
+            msg += "\n" + "".join(traceback.format_exception(*record.exc_info))[-6000:]
+        msg = msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        level = "error" if record.levelno >= logging.ERROR else "warning"
+        print(f"::{level}::{msg}", flush=True)
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)

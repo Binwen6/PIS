@@ -31,6 +31,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API }}
           NOTION_TOKEN: ${{ secrets.PERSONAL_INFORMATION_SOURCE }}   # Notion 集成 token
           DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
+          GITHUB_TOKEN: ${{ github.token }}   # GitHub API rate limit for repo READMEs
         run: python -m pis.main ${{ inputs.force && '--force' || '' }}
       - uses: actions/upload-artifact@v4
         if: always()

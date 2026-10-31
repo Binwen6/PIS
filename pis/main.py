@@ -19,11 +19,11 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from .common import Item, log, utcnow
+from .common import GitHubAnnotations, Item, log, utcnow
 from .digest import make_digest
 from .llm import LLM
 from .notion import Notion
-from . import bootstrap, deepdive, memory, rank, render
+from . import bootstrap, classify, deepdive, memory, rank, render
 from .sources import arxiv, feeds, hf_daily, notion_inbox
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -76,13 +76,12 @@ def run(args) -> int:
         return 2
     ids = bootstrap.ensure(notion, cfg, ROOT) if notion else {}
     parent = ids.get("pis", "")
+    existing = None
     if not args.dry_run:
         existing = notion.find_child_page(parent, title)
         if existing and not args.force:
             log.info("page %s already exists, nothing to do (use --force to rebuild)", title)
             return 0
-        if existing:
-            notion.archive(existing)
 
     profile = load_profile(notion, ids.get("profile"))
     mem_page = ids.get("memory")
@@ -94,6 +93,7 @@ def run(args) -> int:
 
     llm = LLM(cfg["llm"]["base_url"], cfg["llm"]["model"], fallbacks=cfg["llm"].get("fallback_models", []))
     papers, news, inbox = gather(cfg, notion, ids.get("inbox"), now, today)
+    classify.classify(llm, inbox)
 
     acfg, fcfg, lcfg = cfg.get("arxiv", {}), cfg.get("feeds", {}), cfg["llm"]
     n_papers_raw = len(papers)
@@ -130,6 +130,8 @@ def run(args) -> int:
     page_id = notion.create_page(parent, title, render.main_blocks(title, d, numbered, stats, deep), emoji="📰")
     for sub_title, emoji, blocks in render.group_pages(numbered, d, deep):
         notion.create_page(page_id, sub_title, blocks, emoji=emoji)
+    if existing:   # only replace the old page once the new one exists
+        notion.archive(existing)
     notion_inbox.mark_processed(notion, inbox)
 
     if mem_page:   # learn from today's behaviour signals; failure here never loses the digest
@@ -145,11 +147,20 @@ def run(args) -> int:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        h = GitHubAnnotations(logging.WARNING)
+        h.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        logging.getLogger().addHandler(h)
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", action="store_true", help="don't write to Notion, print Markdown")
     p.add_argument("--force", action="store_true", help="rebuild today's page if it exists")
     p.add_argument("--date", help="override page date (YYYY-MM-DD)")
-    sys.exit(run(p.parse_args()))
+    try:
+        code = run(p.parse_args())
+    except Exception:  # noqa: BLE001
+        log.exception("PIS run failed")
+        code = 1
+    sys.exit(code)
 
 
 if __name__ == "__main__":

@@ -62,7 +62,18 @@ class Resp:
             raise RuntimeError(self.status_code)
 
 
+REPO_HTML = """<html><body><h1 id="activity-name">一个让 agent 共享 KV cache 的开源库</h1><div id="js_content"><p>""" + \
+    "安装后即可使用。" * 40 + """<a href="https://github.com/foo/bar">repo</a> 参见 github.com/foo/bar 与 github.com/features/x</p></div></body></html>"""
+
+
 def fake_get(url, **kw):
+    if "api.github.com/repos/foo/bar/readme" in url:
+        return Resp(text="# bar\npip install bar")
+    if "api.github.com/repos/foo/bar" in url:
+        return Resp(js={"html_url": "https://github.com/foo/bar", "description": "KV sharing", "stargazers_count": 42,
+                        "forks_count": 1, "language": "Python", "license": {"spdx_id": "MIT"}, "pushed_at": "2026-10-30"})
+    if "mp.weixin.qq.com/s/repo" in url:
+        return Resp(text=REPO_HTML)
     if "rss.arxiv.org" in url:
         return Resp(ARXIV_RSS)
     if "daily_papers" in url:
@@ -85,12 +96,20 @@ class FakeLLM:
         self.model, self.usage = "fake", {"prompt_tokens": 1, "completion_tokens": 1}
 
     def text(self, system, user, **kw):
+        if "开源项目" in system:                                              # repo template, not the paper one
+            assert "## 3. 上手：最小可运行示例" in system and "12. Follow-up" not in system
+            assert "Stars：42" in user and "pip install bar" in user          # GitHub metadata + README fed in
+            return "## 1. 它解决什么问题\n共享 KV cache。\n```bash\npip install bar\n```\n" + "说明" * 100
         assert "深度解读" in system and "## 12. Follow-up Idea" in system
         assert "$z_a = R z_b$" in user and "REFS" not in user          # LaTeX kept, bibliography dropped
         self.deep_calls = getattr(self, "deep_calls", 0) + 1
         return "## 1. 研究问题与价值\n读取搭档的 $h_t$ 隐状态。\n$$\n\\min_R \\|A-RB\\|\n$$\n- 要点\n" + "正文" * 100
 
     def json(self, system, user, **kw):
+        if "判断用户收藏" in system:
+            chunks = re.split(r"^\[(\d+)\] ", user, flags=re.M)[1:]
+            return {"items": [{"id": int(i), "kind": "repo" if "GitHub" in c else "paper", "why": "x"}
+                              for i, c in zip(chunks[::2], chunks[1::2])]}
         body = user.split("# 待评分条目")[-1].split("# 今日条目")[-1]
         ids = [int(x) for x in re.findall(r"^\[(\d+)\]", body, re.M)]
         if "评分" in system:
@@ -98,11 +117,13 @@ class FakeLLM:
                                  "why": "命中 RL 推理"} for i in ids]}
         if "动态兴趣记忆" in system:
             assert "Agent 评测新基准" in user and "Old ticked paper" in user     # inbox + ticked are fed in
+            assert "[开源项目]" in user
             return {"interests": [{"topic": "Agent 评测", "weight": 4, "trend": "up", "evidence": "收藏+勾选",
                                    "last_seen": "2026-10-31"}],
                     "threads": [{"name": "RLVR for agents", "summary": "GRPO 扩展到 agent", "last_seen": "2026-10-31"}],
                     "preferences": ["偏好有代码"], "notes": "从推理转向 agent 评测"}
         assert "动态记忆" in user and "RLVR for agents" in user                   # memory reaches the digest prompt
+        assert "类型：开源项目" in user and "类型：论文" in user                  # saved items carry their kind
         assert "昨天头条" in user and "同日旧头条" not in user                     # same-day rebuild ignores own headline
         return {"headline": "RLVR 走向 Agent [1]", "takeaways": ["**GRPO** 用于 `Agent` [1]", "收藏 [4]"],
                 "themes": [{"emoji": "🧠", "title": "推理", "body": "讨论 [1][4]，以及不存在的 [99]。",
@@ -138,7 +159,7 @@ class FakeNotion:
         return [{"id": "prof", "type": "child_page", "child_page": {"title": "研究画像"}},
                 {"id": "mem", "type": "child_page", "child_page": {"title": "🧠 记忆"}},   # legacy title -> renamed
                 {"id": "db", "type": "child_database", "child_database": {"title": "Inbox"}},
-                {"id": "lib", "type": "child_database", "child_database": {"title": "论文库"}}]
+                {"id": "lib", "type": "child_database", "child_database": {"title": "论文库"}}]   # legacy -> 知识库
 
     def create_db_page(self, db, props, blocks, emoji=""):
         check_blocks(blocks)
@@ -147,8 +168,8 @@ class FakeNotion:
         return f"deep-{len(self.db_pages)}"
 
     def req(self, method, path, json=None):
-        assert (method, path) == ("PATCH", "/pages/mem") and json["properties"]["title"]["title"][0]["text"]["content"] == "记忆"
-        self.renamed = True
+        self.reqs = getattr(self, "reqs", []) + [(method, path, json)]
+        assert method == "PATCH" and path in ("/pages/mem", "/databases/lib"), path
         return {}
 
     def find_child_page(self, parent, title):
@@ -190,6 +211,11 @@ class FakeNotion:
             "Name": {"type": "title", "title": [{"plain_text": "https://mp.weixin.qq.com/s/abc"}]},
             "URL": {"type": "url", "url": None},
             "Note": {"type": "rich_text", "rich_text": [{"plain_text": "想看评测设计"}]},
+            "Processed": {"type": "checkbox", "checkbox": False}}},
+                {"id": "row2", "properties": {
+            "Name": {"type": "title", "title": [{"plain_text": "https://mp.weixin.qq.com/s/repo"}]},
+            "URL": {"type": "url", "url": None},
+            "Note": {"type": "rich_text", "rich_text": []},
             "Processed": {"type": "checkbox", "checkbox": False}}}]
 
     def update_props(self, pid, props):
@@ -223,7 +249,7 @@ def test_end_to_end(monkeypatch, tmp_path):
     assert M.run(args) == 0
 
     titles = [t for _, t, _ in fake.pages]
-    assert titles == ["2026-10-31", "论文精选（2）", "动态与博客（1）", "我的收藏（1）"], titles
+    assert titles == ["2026-10-31", "论文精选（2）", "动态与博客（1）", "我的收藏（2）"], titles
     main = fake.pages[0][2]
     types_ = [b["type"] for b in main]
     for t in ("callout", "table_of_contents", "heading_2", "quote", "bookmark", "toggle"):
@@ -240,19 +266,27 @@ def test_end_to_end(monkeypatch, tmp_path):
     assert pid == "mem" and mem["interests"][0]["topic"] == "Agent 评测"
     assert mem["feedback_seen"] == ["https://arxiv.org/abs/2610.0"]
     assert mem["recent_headlines"] == ["2026-10-30：昨天头条", "2026-10-31：RLVR 走向 Agent"]
-    assert fake.renamed
+    paths = {(m, p) for m, p, _ in fake.reqs}
+    assert ("PATCH", "/pages/mem") in paths and ("PATCH", "/databases/lib") in paths   # renames + 类型 column
+    assert any(j.get("title", [{}])[0].get("text", {}).get("content") == "知识库" for _, p, j in fake.reqs if j and "title" in j)
     assert sum(b["type"] == "bookmark" for b in main) == 1    # same key item is not bookmarked twice
     # deep dives: inbox article links an arXiv paper -> analysed from full text; linked under its theme
-    assert len(fake.db_pages) == 3                       # inbox paper + two papers scored >= 8
+    assert len(fake.db_pages) == 4                       # 2 saved items + two papers scored >= 8
+    repo = next(p for p in fake.db_pages if p[1]["URL"]["url"] == "https://github.com/foo/bar")
+    assert repo[1]["类型"]["select"]["name"] == "开源项目" and repo[1]["来源"]["select"]["name"] == "微信公众号"
+    assert any(b["type"] == "code" for b in repo[2])
     i, (db, props, dblocks) = next((i, p) for i, p in enumerate(fake.db_pages)
                                   if p[1]["URL"]["url"] == "https://arxiv.org/abs/2610.55555")
-    assert db == "lib"
+    assert db == "lib" and props["类型"]["select"]["name"] == "论文"
     assert props["Name"]["title"][0]["text"]["content"] == "Latent Agents"
     assert any(b["type"] == "equation" for b in dblocks)
     assert any(t["type"] == "equation" for b in dblocks if b["type"] == "paragraph" for t in b["paragraph"]["rich_text"])
     links = [b["link_to_page"]["page_id"] for b in main if b["type"] == "link_to_page"]
     assert f"deep-{i + 1}" in links, links
-    assert any(k["type"] == "link_to_page" for b in fake.pages[3][2] if b["type"] == "to_do" for k in b["to_do"].get("children", []))
+    saved = fake.pages[3][2]
+    assert any(k["type"] == "link_to_page" for b in saved if b["type"] == "to_do" for k in b["to_do"].get("children", []))
+    heads = [b["heading_3"]["rich_text"][0]["text"]["content"] for b in saved if b["type"] == "heading_3"]
+    assert heads == ["🔬 论文", "🧰 开源项目"], heads
     assert fake.updated and fake.updated[0][1]["Processed"]["checkbox"] is True
     assert "Agent 评测新基准" in fake.updated[0][1]["Name"]["title"][0]["text"]["content"]
     md = (M.ROOT / "out" / "2026-10-31.md").read_text()
@@ -289,7 +323,7 @@ def test_bootstrap_creates_missing(tmp_path):
     import yaml
     cfg = yaml.safe_load((root / "config" / "sources.yaml").read_text())
     ids = bootstrap.ensure(N0(), cfg, root)
-    assert created == ["研究画像", "记忆", "Inbox", "论文库"] and ids["library"] == "new-论文库"
+    assert created == ["研究画像", "记忆", "Inbox", "知识库"] and ids["library"] == "new-知识库"
 
 
 def test_model_fallback(monkeypatch):
@@ -316,3 +350,24 @@ def test_model_fallback(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
     c = L.LLM("https://x", "deepseek-flash", api_key="k", fallbacks=["deepseek-chat"])
     assert c.json("s", "u") == {"ok": 1} and calls == ["deepseek-flash", "deepseek-chat"]
+
+
+def test_github_annotations(capsys):
+    import logging
+    from pis.common import GitHubAnnotations
+    h = GitHubAnnotations(logging.WARNING)
+    h.setFormatter(logging.Formatter("%(message)s"))
+    lg = logging.getLogger("t")
+    lg.addHandler(h)
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        lg.exception("run failed 100%")
+    out = capsys.readouterr().out
+    assert out.startswith("::error::run failed 100%25%0ATraceback") and "ValueError: boom" in out
+
+
+def test_github_repo_detection():
+    from pis.web import github_repo_in
+    assert github_repo_in(REPO_HTML) == "foo/bar"
+    assert github_repo_in("see github.com/features/copilot") == ""

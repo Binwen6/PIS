@@ -124,8 +124,17 @@ def group_pages(numbered: list[tuple[int, Item]], d: dict,
         if not rows:
             continue
         blocks: list[dict] = [N.callout(N.rich("☑ 勾选 = 想深读 / 感兴趣，这会成为你的兴趣信号。"), "🎯", "gray_background")]
-        for n, it in rows:
-            blocks += item_blocks(n, it, d, deep)
+        if title.endswith("我的收藏"):
+            from .classify import KINDS
+            for kind, (name, emo) in KINDS.items():
+                sub = [(n, it) for n, it in rows if it.extra.get("kind", "other") == kind]
+                if sub:
+                    blocks.append(N.heading(f"{emo} {name}", 3))
+                    for n, it in sub:
+                        blocks += item_blocks(n, it, d, deep)
+        else:
+            for n, it in rows:
+                blocks += item_blocks(n, it, d, deep)
         emoji, name = title.split(" ", 1)
         pages.append((f"{name}（{len(rows)}）", emoji, blocks))
     return pages
