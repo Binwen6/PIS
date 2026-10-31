@@ -1,4 +1,4 @@
-"""Deep dives stored in the「知识库」database.
+"""Deep dives stored in the 知识库 database.
 
 Papers get the full-text, 12-question critical analysis; other saved items (open-source repos, AI tips,
 research methods, news/opinion) get a template that fits what they are.
@@ -16,6 +16,8 @@ from datetime import date
 from bs4 import BeautifulSoup
 
 from .common import Item, http_get, log
+from .style import WRITING_STYLE, sanitize
+from . import resolve
 from .llm import LLM
 from .notion import Notion
 from . import notion as N
@@ -45,7 +47,7 @@ PAPER_SYSTEM = """你是一位顶尖的机器学习研究者，正在为一位�
 核心数学推导过程是什么（让数学基础薄弱的读者从理论视角理解方法）？如果有，补充理论背景，讲清理论基础和 intuition，公式逐个解释符号含义；如果论文没有实质数学内容，说明并跳过。
 
 ## 7. 实验设计：问题 → 实验 → 答案
-论文如何设计实验来验证方法和 claim？每条按「提出了什么问题 → 设计了什么实验验证 → 答案是什么」的格式写成一个列表项。不需要很多数据细节，只要核心思路。
+论文如何设计实验来验证方法和 claim？每条按“提出了什么问题 → 设计了什么实验验证 → 答案是什么”的格式写成一个列表项。不需要很多数据细节，只要核心思路。
 
 ## 8. Take-aways
 总结这篇论文的 take-aways。
@@ -63,16 +65,12 @@ PAPER_SYSTEM = """你是一位顶尖的机器学习研究者，正在为一位�
 基于你的知识和分析，提出一个 follow-up idea：要 novel，不是增量研究，从方法缺陷（Limitation）和真实需求出发，说清动机、核心做法和如何验证。
 """
 
-STYLE = """## 写作要求
-- 风格参考 Andrej Karpathy 和 Kaiming He，要有真人的语感。
-- 使用详细的、准确的 claim，每句话都要有信息量，避免大空话和泛泛而谈。
-- 使用流畅的文本，避免滥用破折号、引号，保持输出内容清洁流畅、易读性高。
-- 使用真人逻辑，避免使用「不是……而是……」这种 AI 的低信息量结构。
+STYLE = WRITING_STYLE + """
 
 ## 格式要求
 - 数学公式用 LaTeX：行内用 $...$，独立公式单独成行用 $$...$$。
 - 可以用 **粗体** 标出关键概念，可以用列表；不要用表格，不要用 HTML。
-- 直接从「## 1.」开始输出，不要写前言或结语。
+- 直接从第一个二级标题开始输出，不要写前言或结语。
 - 原文中没有的数字和结论不要编造；如果只拿到了摘要或二手文章，在相关处如实说明哪些是推断。"""
 
 DEEP_SYSTEM = PAPER_SYSTEM + "\n" + STYLE
@@ -149,7 +147,7 @@ KIND_SYSTEMS = {
 def system_for(kind: str) -> str:
     if kind == "paper":
         return DEEP_SYSTEM
-    return KIND_SYSTEMS.get(kind, KIND_SYSTEMS["other"]) + "\n" + STYLE.replace("「## 1.」", "第一个二级标题")
+    return KIND_SYSTEMS.get(kind, KIND_SYSTEMS["other"]) + "\n" + STYLE
 
 
 def find_arxiv_id(*texts: str) -> str | None:
@@ -200,6 +198,18 @@ def re_space(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def pdf_text(url: str, limit: int) -> str:
+    try:
+        from pypdf import PdfReader
+        r = http_get(url, timeout=90, retries=2)
+        if r.status_code == 200 and r.content[:5] == b"%PDF-":
+            txt = "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(r.content)).pages)
+            return txt[:limit] if len(txt) > 3000 else ""
+    except Exception as e:  # noqa: BLE001
+        log.warning("PDF %s failed: %s", url, e)
+    return ""
+
+
 def fulltext(aid: str, limit: int) -> tuple[str, str]:
     try:
         r = http_get(f"https://arxiv.org/html/{aid}", timeout=60, retries=2)
@@ -209,16 +219,9 @@ def fulltext(aid: str, limit: int) -> tuple[str, str]:
                 return txt[:limit], "arXiv HTML 全文"
     except Exception as e:  # noqa: BLE001
         log.warning("arXiv HTML %s failed: %s", aid, e)
-    try:
-        from pypdf import PdfReader
-        r = http_get(f"https://arxiv.org/pdf/{aid}", timeout=90, retries=2)
-        if r.status_code == 200:
-            reader = PdfReader(io.BytesIO(r.content))
-            txt = "\n".join((p.extract_text() or "") for p in reader.pages)
-            if len(txt) > 3000:
-                return txt[:limit], "arXiv PDF 全文"
-    except Exception as e:  # noqa: BLE001
-        log.warning("arXiv PDF %s failed: %s", aid, e)
+    txt = pdf_text(f"https://arxiv.org/pdf/{aid}", limit)
+    if txt:
+        return txt, "arXiv PDF 全文"
     return "", ""
 
 
@@ -274,16 +277,21 @@ def _existing(notion: Notion, lib: str, url: str) -> str | None:
         return None
 
 
-def _header(it: Item, title: str, authors: str, aid: str | None, basis: str, emoji: str = "📄") -> list[dict]:
-    links = []
+def _header(it: Item, title: str, authors: str, aid: str | None, basis: str, emoji: str = "📄",
+            pdf_url: str | None = None) -> list[dict]:
+    pairs = []
     if it.extra.get("github"):
-        links += N.rich("GitHub", link=f"https://github.com/{it.extra['github']}") + N.rich(" · ")
+        pairs.append(("GitHub", f"https://github.com/{it.extra['github']}"))
     if aid:
-        links += N.rich("arXiv", link=f"https://arxiv.org/abs/{aid}") + N.rich(" · ") + \
-                 N.rich("PDF", link=f"https://arxiv.org/pdf/{aid}") + N.rich(" · ") + \
-                 N.rich("HF 讨论", link=f"https://huggingface.co/papers/{aid}")
+        pairs += [("arXiv", f"https://arxiv.org/abs/{aid}"), ("PDF", f"https://arxiv.org/pdf/{aid}"),
+                  ("HF 讨论", f"https://huggingface.co/papers/{aid}")]
+    elif pdf_url:
+        pairs.append(("论文 PDF", pdf_url))
     if it.source == "inbox":
-        links += (N.rich(" · ") if links else []) + N.rich("原文章", link=it.url)
+        pairs.append(("原文章", it.url))
+    links: list[dict] = []
+    for i, (label, href) in enumerate(pairs):
+        links += (N.rich("  /  ") if i else []) + N.rich(label, link=href)
     c = N.callout(N.rich(title, bold=True), emoji, "gray_background")
     kids = []
     if authors:
@@ -298,28 +306,41 @@ def _header(it: Item, title: str, authors: str, aid: str | None, basis: str, emo
 
 
 def analyse(llm: LLM, notion: Notion, lib: str, profile: str, n: int, it: Item, today: date,
-            cfg: dict) -> tuple[int, str] | None:
+            cfg: dict, refresh: bool = False) -> tuple[int, str, bool] | None:
+    """-> (n, page_id, created). With refresh=True an existing entry is rewritten in place (links stay valid)."""
     from .classify import KINDS
     kind = it.extra.get("kind", "paper")
     kind_label, emoji = KINDS.get(kind, KINDS["other"])
     aid = it.extra.get("arxiv_id") if kind == "paper" else None
     gh = it.extra.get("github") if kind == "repo" else None
+    pdf_url, paper_title = None, None
+    if kind == "paper" and not aid and it.source == "inbox":   # second-hand article: go find the original
+        hit = resolve.find_paper(llm, it)
+        if hit:
+            aid, pdf_url, paper_title = hit.get("arxiv_id"), hit.get("pdf_url"), hit.get("title")
+            if aid:
+                it.extra["arxiv_id"] = aid
     url = f"https://arxiv.org/abs/{aid}" if aid else (f"https://github.com/{gh}" if gh else it.url)
-    found = _existing(notion, lib, url)
-    if found:
+    found = next((f for f in (_existing(notion, lib, u) for u in dict.fromkeys([url, it.url])) if f), None)
+    if found and not refresh:
         log.info("deep dive [%d] already in library", n)
-        return n, found
+        return n, found, False
 
     note = f"读者收藏时的备注：{it.note}\n" if it.note else ""
     if kind == "paper":
         meta = _meta(aid) if aid else {}
-        title = meta.get("title") or it.title
+        title = meta.get("title") or paper_title or it.title
         authors = meta.get("authors") or it.authors
         abstract = meta.get("abstract") or (it.text if it.source != "inbox" else "")
         body, basis = fulltext(aid, cfg.get("max_chars", 150000)) if aid else ("", "")
+        if not body and pdf_url:
+            body = pdf_text(pdf_url, cfg.get("max_chars", 150000))
+            basis = "论文 PDF 全文（经 Semantic Scholar 找到）" if body else ""
+        if body and it.source == "inbox" and it.text:
+            body += f"\n\n# 读者收藏的中文解读文章（仅供参考，以论文原文为准）\n{it.text[:20000]}"
         if not body:
             if it.source == "inbox" and it.text:
-                body, basis = it.text, "公众号/网页文章（二手解读，非论文原文）"
+                body, basis = it.text, "公众号/网页文章（没能找到论文原文，属于二手解读）"
             else:
                 body, basis = abstract, "仅摘要（未能获取全文，深度有限）"
         user = (f"# 读者研究背景\n{profile[:3000]}\n\n# 论文\n标题：{title}\n作者：{authors}\n"
@@ -334,7 +355,7 @@ def analyse(llm: LLM, notion: Notion, lib: str, profile: str, n: int, it: Item, 
         user = (f"# 读者研究背景\n{profile[:3000]}\n\n# 收藏内容（类型：{kind_label}）\n标题：{title}\n"
                 f"{note}\n# 正文（{basis}）\n{body[:cfg.get('max_chars', 150000)]}")
     try:
-        md = llm.text(system_for(kind), user, temperature=0.5, max_tokens=cfg.get("max_tokens", 32768))
+        md = sanitize(llm.text(system_for(kind), user, temperature=0.5, max_tokens=cfg.get("max_tokens", 32768)))
     except Exception as e:  # noqa: BLE001
         log.error("deep dive [%d] %s failed: %s", n, title[:60], e)
         return None
@@ -343,19 +364,24 @@ def analyse(llm: LLM, notion: Notion, lib: str, profile: str, n: int, it: Item, 
         "Name": {"title": [{"text": {"content": title[:200]}}]},
         "URL": {"url": url},
         "日期": {"date": {"start": today.isoformat()}},
-        "来源": {"select": {"name": (it.origin or "未知").split(" · ")[0].replace(",", " ")[:90]}},
+        "来源": {"select": {"name": (it.origin or "未知").split("（")[0].replace(",", " ")[:90]}},
         "类型": {"select": {"name": kind_label}},
     }
     if it.score and it.source != "inbox":
         props["相关度"] = {"number": it.score}
-    blocks = _header(it, title, authors, aid, basis, emoji) + N.md_to_blocks(md)
+    blocks = _header(it, title, authors, aid, basis, emoji, pdf_url) + N.md_to_blocks(md)
     try:
-        pid = notion.create_db_page(lib, props, blocks, emoji=emoji)
+        if found:
+            notion.update_props(found, props)
+            notion.replace_content(found, blocks)
+            pid = found
+        else:
+            pid = notion.create_db_page(lib, props, blocks, emoji=emoji)
     except Exception as e:  # noqa: BLE001
         log.error("writing deep dive [%d] failed: %s", n, e)
         return None
-    log.info("deep dive [%d] %s -> %s (%s)", n, title[:60], pid, basis)
-    return n, pid
+    log.info("deep dive [%d] %s -> %s (%s%s)", n, title[:60], pid, basis, ", refreshed" if found else "")
+    return n, pid, not found
 
 
 def run(llm: LLM, notion: Notion, lib: str, profile: str, numbered: list[tuple[int, Item]],
@@ -366,4 +392,4 @@ def run(llm: LLM, notion: Notion, lib: str, profile: str, numbered: list[tuple[i
     log.info("deep dives: %d targets", len(targets))
     with ThreadPoolExecutor(max_workers=cfg.get("workers", 3)) as ex:
         res = ex.map(lambda t: analyse(llm, notion, lib, profile, t[0], t[1], today, cfg), targets)
-        return dict(r for r in res if r)
+        return {r[0]: r[1] for r in res if r}

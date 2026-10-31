@@ -410,3 +410,51 @@ def test_backfill(monkeypatch, tmp_path):
     pid, blocks = appended[0]
     assert pid == "day-1030" and blocks[0]["type"] == "heading_2"
     assert [b["link_to_page"]["page_id"] for b in blocks[1:]] == ["deep-1", "deep-2"]
+
+
+def test_sanitize_style():
+    from pis.style import sanitize
+    s = sanitize("提速 2.6×，3×3 卷积，见「原文」，检索头 · 稀疏性，公式 $a \\times b \\cdot c$ 和 `x·y` 保留 ✓")
+    assert s == "提速 2.6 倍，3x3 卷积，见“原文”，检索头、稀疏性，公式 $a \\times b \\cdot c$ 和 `x·y` 保留 ", s
+
+
+class _IdLLM:
+    def json(self, system, user, **kw):
+        assert "英文原标题" in system
+        return {"is_paper": True, "title": "Context Is Weights: Compiling Prompts into Rank-1 Patches",
+                "authors": ["A. Smith"], "venue": "ICML 2026", "arxiv_id": ""}
+
+
+def test_resolve_via_arxiv(monkeypatch):
+    from pis import resolve
+    from pis.common import Item
+    atom = b"""<feed xmlns="http://www.w3.org/2005/Atom">
+      <entry><id>http://arxiv.org/abs/2610.11111v1</id><title>Something Else Entirely</title></entry>
+      <entry><id>http://arxiv.org/abs/2610.77777v2</id><title>Context is Weights: Compiling
+        Prompts into Rank-1 Patches</title></entry></feed>"""
+    monkeypatch.setattr(common.requests, "get", lambda url, **kw: Resp(atom))
+    hit = resolve.find_paper(_IdLLM(), Item(source="inbox", title="上下文就是权重", url="u", text="文章正文"))
+    assert hit["arxiv_id"] == "2610.77777"
+
+
+def test_resolve_falls_back_to_semantic_scholar(monkeypatch):
+    from pis import resolve
+    from pis.common import Item
+
+    def get(url, **kw):
+        if "export.arxiv.org" in url:
+            return Resp(b"<feed xmlns='http://www.w3.org/2005/Atom'></feed>")
+        return Resp(js={"data": [{"title": "Context Is Weights: Compiling Prompts Into Rank-1 Patches",
+                                  "externalIds": {"DOI": "x"}, "openAccessPdf": {"url": "https://openreview.net/pdf?id=abc"},
+                                  "url": "https://www.semanticscholar.org/paper/abc"}]})
+    monkeypatch.setattr(common.requests, "get", get)
+    hit = resolve.find_paper(_IdLLM(), Item(source="inbox", title="t", url="u", text="x"))
+    assert hit["pdf_url"] == "https://openreview.net/pdf?id=abc" and not hit["arxiv_id"]
+
+
+def test_resolve_rejects_wrong_title(monkeypatch):
+    from pis import resolve
+    from pis.common import Item
+    atom = b"<feed xmlns='http://www.w3.org/2005/Atom'><entry><id>http://arxiv.org/abs/2610.11111v1</id><title>Unrelated Paper About Cats</title></entry></feed>"
+    monkeypatch.setattr(common.requests, "get", lambda url, **kw: Resp(atom, js={"data": []}))
+    assert resolve.find_paper(_IdLLM(), Item(source="inbox", title="t", url="u", text="x")) is None

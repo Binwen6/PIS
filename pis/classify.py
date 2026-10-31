@@ -36,7 +36,7 @@ def _heuristic(it: Item) -> str:
 
 
 def classify(llm: LLM, items: list[Item]) -> None:
-    """Sets it.extra['kind'] and makes the kind visible in it.origin (e.g. '微信公众号 · AI 技巧')."""
+    """Sets it.extra['kind'] and makes the kind visible in it.origin (e.g. '微信公众号（AI 技巧）')."""
     if not items:
         return
     lines = []
@@ -58,5 +58,5 @@ def classify(llm: LLM, items: list[Item]) -> None:
         log.warning("classification failed, using heuristics: %s", e)
     for i, it in enumerate(items):
         it.extra["kind"] = result.get(i) or _heuristic(it)
-        it.origin = f"{it.origin} · {label(it)}"
+        it.origin = f"{it.origin}（{label(it)}）"
     log.info("inbox kinds: %s", [it.extra["kind"] for it in items])

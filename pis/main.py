@@ -105,7 +105,7 @@ def run(args) -> int:
     numbered = list(enumerate(top_papers + top_news + inbox, start=1))
     d = make_digest(llm, context, numbered, cfg["llm"].get("digest_max_tokens", 32768))
     stats = (f"arXiv/HF 共 {n_papers_raw} 篇 → 精选 {len(top_papers)} 篇；动态 {len(news)} 条 → 精选 {len(top_news)} 条；"
-             f"收藏 {len(inbox)} 条 · 模型 {llm.model} · tokens 入 {llm.usage['prompt_tokens']} / 出 {llm.usage['completion_tokens']}")
+             f"收藏 {len(inbox)} 条；模型 {llm.model}；tokens 入 {llm.usage['prompt_tokens']} / 出 {llm.usage['completion_tokens']}")
 
     out_dir = ROOT / "out"
     out_dir.mkdir(exist_ok=True)
@@ -124,7 +124,7 @@ def run(args) -> int:
             deep = deepdive.run(llm, notion, ids["library"], profile, numbered, today, dcfg)
         except Exception as e:  # noqa: BLE001 - deep dives are a bonus; never lose the digest
             log.error("deep dives failed: %s", e)
-    stats = (stats.split(" · tokens")[0] + f" · 深度解析 {len(deep)} 篇 · tokens 入 {llm.usage['prompt_tokens']}"
+    stats = (stats.split("；tokens")[0] + f"；深度解析 {len(deep)} 篇；tokens 入 {llm.usage['prompt_tokens']}"
              f" / 出 {llm.usage['completion_tokens']}")
 
     page_id = notion.create_page(parent, title, render.main_blocks(title, d, numbered, stats, deep), emoji="📰")

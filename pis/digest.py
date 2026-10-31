@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .common import Item, log
+from .style import WRITING_STYLE, sanitize_obj
 from .llm import LLM
 
 DIGEST_SYSTEM = """你是这位研究者的私人科研情报编辑，也是同领域的资深同行。你会收到：
@@ -19,7 +20,7 @@ DIGEST_SYSTEM = """你是这位研究者的私人科研情报编辑，也是同�
 6. **克制与诚实**：不夸大，不用“颠覆”“炸裂”等词；摘要信息不足以判断时直说；只能引用给定编号，不能编造。
 7. **格式**：每提到一项工作紧跟 [编号]（可 [2][5] 连用）；关键术语可用 **粗体**；模型名/方法名/代码名可用 `反引号`；专有名词保留英文。
 8. 用户亲自收藏的条目代表其主动关注，必须被融入正文，而不是放在最后一笔带过。
-9. 收藏条目标注了类型（论文 / 开源项目 / AI 技巧 / 科研方法 / 资讯观点 / 其他）。只有论文按研究工作的标准去综合和评价；开源项目、AI 技巧、科研方法这类实用内容，讲清它解决什么实际问题、怎么用到读者的工作里，可以单独组成一个实用主题（如「🛠 工具与方法」）；资讯观点要区分事实和观点。不要把实用内容硬塞进研究主题里。
+9. 收藏条目标注了类型（论文 / 开源项目 / AI 技巧 / 科研方法 / 资讯观点 / 其他）。只有论文按研究工作的标准去综合和评价；开源项目、AI 技巧、科研方法这类实用内容，讲清它解决什么实际问题、怎么用到读者的工作里，可以单独组成一个实用主题（如“🛠 工具与方法”）；资讯观点要区分事实和观点。不要把实用内容硬塞进研究主题里。
 
 ## 输出 JSON
 {
@@ -51,7 +52,7 @@ def build_input(context: str, numbered: list[tuple[int, Item]], max_chars: int =
             meta.append(f"HF 社区点赞 {it.upvotes}")
         if it.source == "inbox":
             from .classify import label
-            meta.append(f"★ 用户亲自收藏 · 类型：{label(it)}")
+            meta.append(f"★ 用户亲自收藏，类型：{label(it)}")
         if it.note:
             meta.append(f"用户备注：{it.note}")
         if it.why:
@@ -71,7 +72,8 @@ def make_digest(llm: LLM, context: str, numbered: list[tuple[int, Item]], max_to
         d = {"headline": "过去 24 小时没有与你研究方向高度相关的新内容", "takeaways": [], "themes": [], "threads": [], "items": []}
     else:
         try:
-            d = llm.json(DIGEST_SYSTEM, build_input(context, numbered), temperature=0.4, max_tokens=max_tokens)
+            d = sanitize_obj(llm.json(DIGEST_SYSTEM + "\n\n" + WRITING_STYLE, build_input(context, numbered),
+                                      temperature=0.4, max_tokens=max_tokens))
         except Exception as e:  # noqa: BLE001 - an API outage must not cost the whole day's page
             log.error("digest generation failed, publishing items only: %s", e)
             d = fallback_digest(numbered)

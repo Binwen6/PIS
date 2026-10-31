@@ -3,8 +3,9 @@
   python -m pis.backfill "https://arxiv.org/abs/2610.39302 https://mp.weixin.qq.com/s/xxx" [--date 2026-10-31]
 
 Each target may be an arXiv link / id or any article link (公众号, 知乎, blog...). Articles are classified
-like Inbox items (paper / repo / tip / ...) and get the matching template. Deep dives already in the
-知识库 are reused, not regenerated. Links are appended to that day's page under「🔬 补充深度解析」.
+like Inbox items (paper / repo / tip / ...) and get the matching template. A deep dive already in the
+知识库 is regenerated in place, so existing links keep working; new ones are linked on that day's page
+under "🔬 补充深度解析".
 """
 from __future__ import annotations
 
@@ -68,12 +69,14 @@ def run(targets: list[str], day: date | None) -> int:
     items = [to_item(t, notion, ids.get("inbox")) for t in targets]
     classify.classify(llm, [it for it in items if it.source == "inbox"])
     dcfg = cfg.get("deep_dive", {})
-    pages: list[str] = []
-    for i, it in enumerate(items, start=1):
-        res = deepdive.analyse(llm, notion, ids["library"], profile, i, it, day, dcfg)
-        if res:
-            pages.append(res[1])
-        else:
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=dcfg.get("workers", 5)) as ex:
+        results = list(ex.map(lambda x: deepdive.analyse(llm, notion, ids["library"], profile, x[0], x[1], day,
+                                                         dcfg, refresh=True), enumerate(items, start=1)))
+    pages = [r[1] for r in results if r and r[2]]      # newly created -> need a link on the day page
+    done = sum(1 for r in results if r)
+    for it, r in zip(items, results):
+        if not r:
             log.error("backfill failed for %s", it.url)
 
     day_page = notion.find_child_page(ids["pis"], day.isoformat())
@@ -82,7 +85,7 @@ def run(targets: list[str], day: date | None) -> int:
         log.info("linked %d deep dives on %s", len(pages), day.isoformat())
     elif pages:
         log.warning("no daily page titled %s; deep dives are in 知识库 only", day.isoformat())
-    return 0 if len(pages) == len(items) else 1
+    return 0 if done == len(items) else 1
 
 
 def main() -> None:

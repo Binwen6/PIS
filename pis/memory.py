@@ -21,7 +21,7 @@ from . import notion as N
 EMPTY = {"interests": [], "threads": [], "preferences": [], "notes": "",
          "recent_headlines": [], "feedback_seen": []}
 
-MEMORY_SYSTEM = """你负责维护一位科研人员的「动态兴趣记忆」。输入包括：长期研究画像（用户亲手写的，稳定）、旧记忆、以及今天的新行为信号。
+MEMORY_SYSTEM = """你负责维护一位科研人员的“动态兴趣记忆”。输入包括：长期研究画像（用户亲手写的，稳定）、旧记忆、以及今天的新行为信号。
 请输出更新后的记忆 JSON：
 {
   "interests": [{"topic": "具体到方法/问题层面的兴趣点", "weight": 1-5, "trend": "up|steady|down",
@@ -118,7 +118,8 @@ def update(llm: LLM, profile: str, mem: dict, today: date, inbox: list[Item],
     user = (f"# 长期研究画像\n{profile}\n\n# 旧记忆\n{json.dumps(old, ensure_ascii=False)}\n\n# 新信号\n"
             + "\n".join(signals))
     try:
-        new = llm.json(MEMORY_SYSTEM, user, temperature=0.2, max_tokens=16000)
+        from .style import sanitize_obj
+        new = sanitize_obj(llm.json(MEMORY_SYSTEM, user, temperature=0.2, max_tokens=16000))
     except Exception as e:  # noqa: BLE001
         log.warning("memory update failed, keeping old memory: %s", e)
         new = old
@@ -135,7 +136,7 @@ _TREND = {"up": "📈", "steady": "➖", "down": "📉"}
 
 def blocks(mem: dict, today: date) -> list[dict]:
     out = [N.callout(N.rich(f"本页由 PIS 根据你的收藏、勾选与每日推送自动维护（更新于 {today.isoformat()}）。"
-                            "想调整长期方向请编辑「🧭 研究画像」；想纠正这里的判断，直接在每日页面勾选/在 Inbox 写备注即可。"),
+                            "想调整长期方向请编辑“研究画像”页；想纠正这里的判断，直接在每日页面勾选/在 Inbox 写备注即可。"),
                      "🧠", "purple_background")]
     if mem.get("notes"):
         out.append(N.quote(N.rich(mem["notes"], italic=True)))

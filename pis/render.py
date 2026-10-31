@@ -26,10 +26,10 @@ def _meta(it: Item, with_score: bool = True) -> str:
         a = it.authors.split(",")
         bits.append(", ".join(x.strip() for x in a[:3]) + (" 等" if len(a) > 3 else ""))
     if it.upvotes:
-        bits.append(f"🔥 HF {it.upvotes}")
+        bits.append(f"🔥 HF {it.upvotes} 赞")
     if with_score and it.score and it.source != "inbox":
         bits.append(f"相关度 {it.score:.0f}/10")
-    return " · ".join(b for b in bits if b)
+    return "，".join(b for b in bits if b)
 
 
 def _short(s: str, n: int) -> str:
@@ -89,7 +89,7 @@ def main_blocks(date_title: str, d: dict, numbered: list[tuple[int, Item]], stat
         blocks.append(N.toggle(N.rich("📋 全部条目一览", bold=True), [N.table(["#", "标题", "来源", "相关度"], rows)]))
 
     blocks.append(N.divider())
-    blocks.append(N.callout(N.rich("在下方子页面中 ☑ 勾选你想深读的条目，PIS 会据此更新「🧠 记忆」，推送会越来越懂你。"),
+    blocks.append(N.callout(N.rich("在下方子页面中 ☑ 勾选你想深读的条目，PIS 会据此更新“记忆”页，推送会越来越懂你。"),
                             "🎯", "gray_background"))
     blocks.append(N.paragraph(N.rich(stats, color="gray")))
     return blocks
@@ -150,7 +150,7 @@ def _md(text: str, links: dict[int, str]) -> str:
 
 def markdown(date_title: str, d: dict, numbered: list[tuple[int, Item]], stats: str) -> str:
     links = {n: it.url for n, it in numbered}
-    out = [f"# PIS · {date_title}", "", f"> 📌 **{d.get('headline', '')}**", ""]
+    out = [f"# PIS 每日简报 {date_title}", "", f"> 📌 **{d.get('headline', '')}**", ""]
     if d.get("takeaways"):
         out += ["**⏱ 30 秒速览**", ""] + [f"- {_md(t, links)}" for t in d["takeaways"]] + [""]
     for th in d.get("themes", []):
