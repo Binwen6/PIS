@@ -60,7 +60,7 @@ DEEPSEEK_API_KEY=sk-xxx python -m pis.main --dry-run
 
 - **iOS 快捷指令**（最顺手）：新建快捷指令，开启“在共享表单中显示”，接收 URL/文本 →
   「获取 URL 内容」：`POST https://api.notion.com/v1/pages`，请求头
-  `Authorization: Bearer <NOTION_TOKEN>`、`Notion-Version: 2022-06-28`、`Content-Type: application/json`，JSON 正文：
+  `Authorization: Bearer <Notion 集成 token>`、`Notion-Version: 2022-06-28`、`Content-Type: application/json`，JSON 正文：
   ```json
   {"parent": {"database_id": "<Inbox 数据库 ID：打开 Inbox 整页，链接中 ?v= 之前那 32 位>"},
    "properties": {"Name": {"title": [{"text": {"content": "<快捷指令输入>"}}]},
