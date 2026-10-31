@@ -1,6 +1,7 @@
 """Offline end-to-end test: fake HTTP sources, fake DeepSeek, fake Notion."""
 import json
 import re
+from datetime import date
 import sys
 import types
 from email.utils import format_datetime
@@ -387,3 +388,25 @@ def test_digest_degrades_gracefully():
     d = make_digest(Flaky(), "ctx", items)
     assert len(calls) == 1 and calls[0] > 3000               # full text, no compaction
     assert d["headline"].startswith("今日摘要生成失败") and 1 in d["items_by_id"]
+
+
+def test_backfill(monkeypatch, tmp_path):
+    from pis import backfill as B, main as M2
+    monkeypatch.setattr(common.requests, "get", fake_get)
+    monkeypatch.setattr(B, "LLM", FakeLLM)
+    fake = FakeNotion()
+    appended = []
+    fake.append = lambda pid, blocks: appended.append((pid, blocks))
+    monkeypatch.setattr(B, "Notion", lambda *a, **k: fake)
+    monkeypatch.setattr(B, "ROOT", _root_copy(tmp_path))
+    monkeypatch.setattr(M2, "ROOT", B.ROOT)
+    for k, v in {"NOTION_TOKEN": "x", "NOTION_PIS_PAGE_ID": "pis", "DEEPSEEK_API_KEY": "k"}.items():
+        monkeypatch.setenv(k, v)
+    code = B.run(["2610.39302", "https://mp.weixin.qq.com/s/repo"], date(2026, 10, 30))
+    assert code == 0
+    urls = [p[1]["URL"]["url"] for p in fake.db_pages]
+    assert urls == ["https://arxiv.org/abs/2610.39302", "https://github.com/foo/bar"], urls
+    assert fake.db_pages[0][1]["Name"]["title"][0]["text"]["content"] == "Latent Agents"   # title from arXiv meta
+    pid, blocks = appended[0]
+    assert pid == "day-1030" and blocks[0]["type"] == "heading_2"
+    assert [b["link_to_page"]["page_id"] for b in blocks[1:]] == ["deep-1", "deep-2"]
