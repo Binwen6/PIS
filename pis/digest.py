@@ -1,7 +1,7 @@
 """Turn the selected items into a digested, personalised Chinese daily briefing."""
 from __future__ import annotations
 
-from .common import Item
+from .common import Item, log
 from .llm import LLM
 
 DIGEST_SYSTEM = """你是这位研究者的私人科研情报编辑，也是同领域的资深同行。你会收到：
@@ -35,15 +35,15 @@ DIGEST_SYSTEM = """你是这位研究者的私人科研情报编辑，也是同�
   }],
   "threads": [{"name": "记忆中的跟进线索名", "update": "今天的新进展（带 [编号]）"}],
   "items": [{"id": 编号, "tldr": "一句话：做了什么+关键结果（≤60 字）",
-             "detail": "仅对用户收藏条目：3-4 句消化后的总结（按其类型：论文讲贡献，工具讲用途，技巧讲做法），并说明它和用户兴趣的关系；其他条目留空字符串"}]
+             "detail": "仅对用户收藏条目：1-2 句说明它和用户兴趣的关系（详细解析另有专页）；其他条目留空字符串"}]
 }
 themes 的数量与内容量匹配（一般 1-5 个）：条目很少时 1 个主题即可，绝不要把同一项工作拆成多个主题来凑数；每个条目只归入一个主题；threads 没有就给空数组；items 必须覆盖全部编号。"""
 
 
-def build_input(context: str, numbered: list[tuple[int, Item]]) -> str:
+def build_input(context: str, numbered: list[tuple[int, Item]], compact: bool = False) -> str:
     parts = []
     for n, it in numbered:
-        limit = 2000 if it.source == "inbox" else 1100
+        limit = (500 if compact else 1200) if it.source == "inbox" else (400 if compact else 1000)
         meta = [it.origin]
         if it.authors:
             meta.append(it.authors[:120])
@@ -60,11 +60,26 @@ def build_input(context: str, numbered: list[tuple[int, Item]]) -> str:
     return f"{context}\n\n# 今日条目\n" + "\n\n".join(parts)
 
 
+def fallback_digest(numbered: list[tuple[int, Item]]) -> dict:
+    """Last resort when the model can't produce valid JSON: still publish the items."""
+    return {"headline": "今日摘要生成失败，以下为筛选出的条目（详见子页面与深度解析）", "takeaways": [], "themes": [],
+            "threads": [], "items": [{"id": n, "tldr": (it.why or it.text[:80]), "detail": ""} for n, it in numbered]}
+
+
 def make_digest(llm: LLM, context: str, numbered: list[tuple[int, Item]]) -> dict:
     if not numbered:
         d = {"headline": "过去 24 小时没有与你研究方向高度相关的新内容", "takeaways": [], "themes": [], "threads": [], "items": []}
     else:
-        d = llm.json(DIGEST_SYSTEM, build_input(context, numbered), temperature=0.4, max_tokens=8000)
+        d = None
+        for compact, retries in ((False, 3), (True, 2)):   # full input first, then a slimmer request
+            try:
+                d = llm.json(DIGEST_SYSTEM, build_input(context, numbered, compact), temperature=0.4,
+                             max_tokens=8000, retries=retries)
+                break
+            except Exception as e:  # noqa: BLE001
+                log.error("digest generation failed (compact=%s): %s", compact, e)
+        if d is None:
+            d = fallback_digest(numbered)
     for k, v in {"headline": "", "takeaways": [], "themes": [], "threads": [], "items": []}.items():
         if not isinstance(d.get(k), type(v)):
             d[k] = v

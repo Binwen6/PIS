@@ -371,3 +371,19 @@ def test_github_repo_detection():
     from pis.web import github_repo_in
     assert github_repo_in(REPO_HTML) == "foo/bar"
     assert github_repo_in("see github.com/features/copilot") == ""
+
+
+def test_digest_degrades_gracefully():
+    from pis.common import Item
+    from pis.digest import make_digest
+    calls = []
+
+    class Flaky:
+        def json(self, system, user, **kw):
+            calls.append(len(user))
+            raise RuntimeError("bad JSON; finish_reason=length")
+
+    items = [(1, Item(source="inbox", title="t", url="u", text="x" * 3000))]
+    d = make_digest(Flaky(), "ctx", items)
+    assert len(calls) == 2 and calls[1] < calls[0]          # retried with a compact input
+    assert d["headline"].startswith("今日摘要生成失败") and 1 in d["items_by_id"]

@@ -18,13 +18,14 @@ class LLM:
         self.key = api_key or os.environ["DEEPSEEK_API_KEY"]
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
-    def json(self, system: str, user: str, *, temperature: float = 0.3, max_tokens: int = 8000) -> dict:
-        return self._chat(system, user, temperature, max_tokens, as_json=True)
+    def json(self, system: str, user: str, *, temperature: float = 0.3, max_tokens: int = 8000,
+             retries: int = 4) -> dict:
+        return self._chat(system, user, temperature, max_tokens, as_json=True, retries=retries)
 
     def text(self, system: str, user: str, *, temperature: float = 0.5, max_tokens: int = 8000) -> str:
         return self._chat(system, user, temperature, max_tokens, as_json=False)
 
-    def _chat(self, system: str, user: str, temperature: float, max_tokens: int, as_json: bool):
+    def _chat(self, system: str, user: str, temperature: float, max_tokens: int, as_json: bool, retries: int = 4):
         body = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -34,7 +35,7 @@ class LLM:
         if as_json:
             body["response_format"] = {"type": "json_object"}
         last: Exception | None = None
-        for i in range(4):
+        for i in range(retries):
             try:
                 r = requests.post(self.url, json=body, timeout=300,
                                   headers={"Authorization": f"Bearer {self.key}"})
@@ -48,12 +49,20 @@ class LLM:
                 d = r.json()
                 for k in self.usage:
                     self.usage[k] += d.get("usage", {}).get(k, 0)
-                content = d["choices"][0]["message"]["content"]
+                choice = d["choices"][0]
+                content = choice["message"].get("content") or ""
+                finish = choice.get("finish_reason")
                 if not as_json:
                     if len(content.strip()) < 200:
-                        raise RuntimeError("empty completion")
+                        raise RuntimeError(f"empty completion (finish_reason={finish})")
+                    if finish == "length":
+                        log.warning("completion hit max_tokens (%d chars); keeping what we have", len(content))
                     return content
-                return json.loads(content)
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(f"bad JSON ({e}); finish_reason={finish}, {len(content)} chars, "
+                                       f"usage={d.get('usage')}") from e
             except (requests.RequestException, RuntimeError, json.JSONDecodeError, KeyError) as e:
                 last = e
                 log.warning("LLM call failed (attempt %d): %s", i + 1, e)
