@@ -88,7 +88,7 @@ def run(args) -> int:
     mem_page = ids.get("memory")
     mem = memory.load(notion, mem_page)
     ticked = memory.collect_feedback(notion, parent, today, mem) if mem_page else []
-    context = f"# 研究画像（用户亲手写的长期兴趣）\n{profile}\n\n{memory.as_prompt(mem)}".strip()
+    context = f"# 研究画像（用户亲手写的长期兴趣）\n{profile}\n\n{memory.as_prompt(mem, today)}".strip()
     if ticked:
         context += "\n\n# 用户最近勾选想深读的条目\n" + "\n".join(f"- {t}" for t in ticked)
 

@@ -91,6 +91,7 @@ class FakeLLM:
                     "threads": [{"name": "RLVR for agents", "summary": "GRPO 扩展到 agent", "last_seen": "2026-10-31"}],
                     "preferences": ["偏好有代码"], "notes": "从推理转向 agent 评测"}
         assert "动态记忆" in user and "RLVR for agents" in user                   # memory reaches the digest prompt
+        assert "昨天头条" in user and "同日旧头条" not in user                     # same-day rebuild ignores own headline
         return {"headline": "RLVR 走向 Agent [1]", "takeaways": ["**GRPO** 用于 `Agent` [1]", "收藏 [4]"],
                 "themes": [{"emoji": "🧠", "title": "推理", "body": "讨论 [1][4]，以及不存在的 [99]。",
                             "so_what": "可对比 [1]", "refs": [1, 2, 99], "key_ref": 1},
@@ -114,7 +115,7 @@ def check_blocks(blocks, depth=0):
 
 
 MEM_JSON = json.dumps({"interests": [], "threads": [{"name": "RLVR for agents", "summary": "x", "last_seen": "2026-10-29"}],
-                       "preferences": [], "notes": "", "recent_headlines": ["2026-10-30：昨天头条"], "feedback_seen": []})
+                       "preferences": [], "notes": "", "recent_headlines": ["2026-10-30：昨天头条", "2026-10-31：同日旧头条"], "feedback_seen": []})
 
 
 class FakeNotion:
@@ -217,7 +218,7 @@ def test_end_to_end(monkeypatch, tmp_path):
     mem = json.loads("".join(t["text"]["content"] for t in raw))
     assert pid == "mem" and mem["interests"][0]["topic"] == "Agent 评测"
     assert mem["feedback_seen"] == ["https://arxiv.org/abs/2610.0"]
-    assert mem["recent_headlines"][-1] == "2026-10-31：RLVR 走向 Agent"
+    assert mem["recent_headlines"] == ["2026-10-30：昨天头条", "2026-10-31：RLVR 走向 Agent"]
     assert fake.renamed
     assert sum(b["type"] == "bookmark" for b in main) == 1    # same key item is not bookmarked twice
     assert fake.updated and fake.updated[0][1]["Processed"]["checkbox"] is True

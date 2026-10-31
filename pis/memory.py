@@ -53,7 +53,7 @@ def load(notion: Notion | None, page_id: str | None) -> dict:
     return dict(EMPTY)
 
 
-def as_prompt(mem: dict) -> str:
+def as_prompt(mem: dict, today: date | None = None) -> str:
     if not (mem.get("interests") or mem.get("threads")):
         return ""
     lines = ["# 动态记忆（系统根据用户近期行为自动学习，供参考）"]
@@ -65,9 +65,10 @@ def as_prompt(mem: dict) -> str:
         lines.append(f"- 跟进线索：{t.get('name')} — {t.get('summary', '')}（{t.get('last_seen', '')}）")
     for p in mem.get("preferences", []):
         lines.append(f"- 偏好：{p}")
-    if mem.get("recent_headlines"):
+    past = [h for h in mem.get("recent_headlines", []) if not (today and h.startswith(today.isoformat()))]
+    if past:   # a same-day rebuild must not treat today's own earlier headline as "yesterday"
         lines.append("最近几天的头条（避免重复，必要时承接）：")
-        lines += [f"- {h}" for h in mem["recent_headlines"][-5:]]
+        lines += [f"- {h}" for h in past[-5:]]
     return "\n".join(lines)
 
 
@@ -123,7 +124,8 @@ def update(llm: LLM, profile: str, mem: dict, today: date, inbox: list[Item],
     merged = {**mem, **{k: new.get(k, mem.get(k)) for k in ("interests", "threads", "preferences", "notes")}}
     if digest.get("headline"):
         headline = N._CITE.sub("", digest["headline"]).strip()
-        merged["recent_headlines"] = (mem.get("recent_headlines", []) + [f"{today.isoformat()}：{headline}"])[-7:]
+        past = [h for h in mem.get("recent_headlines", []) if not h.startswith(today.isoformat())]
+        merged["recent_headlines"] = (past + [f"{today.isoformat()}：{headline}"])[-7:]
     return merged
 
 
