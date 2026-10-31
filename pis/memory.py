@@ -122,7 +122,8 @@ def update(llm: LLM, profile: str, mem: dict, today: date, inbox: list[Item],
         new = old
     merged = {**mem, **{k: new.get(k, mem.get(k)) for k in ("interests", "threads", "preferences", "notes")}}
     if digest.get("headline"):
-        merged["recent_headlines"] = (mem.get("recent_headlines", []) + [f"{today.isoformat()}：{digest['headline']}"])[-7:]
+        headline = N._CITE.sub("", digest["headline"]).strip()
+        merged["recent_headlines"] = (mem.get("recent_headlines", []) + [f"{today.isoformat()}：{headline}"])[-7:]
     return merged
 
 

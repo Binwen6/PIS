@@ -17,7 +17,8 @@ from .common import log
 from .notion import Notion
 from . import notion as N
 
-PROFILE_TITLE, MEMORY_TITLE, INBOX_TITLE = "🧭 研究画像", "🧠 记忆", "📥 Inbox"
+PROFILE_TITLE, MEMORY_TITLE, INBOX_TITLE = "研究画像", "记忆", "Inbox"   # emoji lives in the page icon
+LEGACY = {PROFILE_TITLE: "🧭 研究画像", MEMORY_TITLE: "🧠 记忆", INBOX_TITLE: "📥 Inbox"}
 
 ACCESS_HINT = ("无法访问 PIS 页面：请在 Notion 打开该页面 → 右上角 ··· → Connections（连接）→ 添加你的集成，"
                "并确认 GitHub Secret 中的 token 属于这个集成。")
@@ -60,17 +61,31 @@ def ensure(notion: Notion, cfg: dict, root: Path) -> dict[str, str]:
     pages = {b["child_page"]["title"]: b["id"] for b in kids if b["type"] == "child_page"}
     dbs = {b["child_database"]["title"]: b["id"] for b in kids if b["type"] == "child_database"}
 
+    def existing(found: dict, title: str, kind: str) -> str | None:
+        if title in found:
+            return found[title]
+        old = found.get(LEGACY[title])
+        if old:   # created by an earlier version with the emoji duplicated in the title
+            path, key = ("/pages/", "properties") if kind == "page" else ("/databases/", "title")
+            text = [{"type": "text", "text": {"content": title}}]
+            body = {"properties": {"title": {"title": text}}} if kind == "page" else {"title": text}
+            try:
+                notion.req("PATCH", path + old, json=body)
+            except RuntimeError as e:
+                log.warning("rename %s failed: %s", title, e)
+        return old
+
     ids = {"pis": pis}
-    ids["profile"] = os.environ.get("NOTION_PROFILE_PAGE_ID") or pages.get(PROFILE_TITLE) or notion.create_page(
+    ids["profile"] = os.environ.get("NOTION_PROFILE_PAGE_ID") or existing(pages, PROFILE_TITLE, "page") or notion.create_page(
         pis, PROFILE_TITLE,
         [N.callout(N.rich("这是你的长期研究画像。直接编辑本页即可，下次运行自动生效。写得越具体，筛选越准。"), "✏️")]
         + profile_blocks((root / "config" / "profile.md").read_text(encoding="utf-8")),
         emoji="🧭")
-    ids["memory"] = os.environ.get("NOTION_MEMORY_PAGE_ID") or pages.get(MEMORY_TITLE) or notion.create_page(
+    ids["memory"] = os.environ.get("NOTION_MEMORY_PAGE_ID") or existing(pages, MEMORY_TITLE, "page") or notion.create_page(
         pis, MEMORY_TITLE,
         [N.callout(N.rich("PIS 每天运行后会在这里写入它对你近期兴趣的理解。"), "🧠", "purple_background")],
         emoji="🧠")
-    ids["inbox"] = os.environ.get("NOTION_INBOX_DB_ID") or dbs.get(INBOX_TITLE) or notion.req("POST", "/databases", json={
+    ids["inbox"] = os.environ.get("NOTION_INBOX_DB_ID") or existing(dbs, INBOX_TITLE, "db") or notion.req("POST", "/databases", json={
         "parent": {"type": "page_id", "page_id": pis},
         "icon": {"type": "emoji", "emoji": "📥"},
         "title": [{"type": "text", "text": {"content": INBOX_TITLE}}],

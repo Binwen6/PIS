@@ -91,10 +91,10 @@ class FakeLLM:
                     "threads": [{"name": "RLVR for agents", "summary": "GRPO 扩展到 agent", "last_seen": "2026-10-31"}],
                     "preferences": ["偏好有代码"], "notes": "从推理转向 agent 评测"}
         assert "动态记忆" in user and "RLVR for agents" in user                   # memory reaches the digest prompt
-        return {"headline": "RLVR 走向 Agent", "takeaways": ["**GRPO** 用于 `Agent` [1]", "收藏 [4]"],
+        return {"headline": "RLVR 走向 Agent [1]", "takeaways": ["**GRPO** 用于 `Agent` [1]", "收藏 [4]"],
                 "themes": [{"emoji": "🧠", "title": "推理", "body": "讨论 [1][4]，以及不存在的 [99]。",
                             "so_what": "可对比 [1]", "refs": [1, 2, 99], "key_ref": 1},
-                           {"emoji": "🛠", "title": "工具", "body": "[3]", "refs": [3, 4], "key_ref": 42}],
+                           {"emoji": "🛠", "title": "工具", "body": "[3]", "refs": [3, 4], "key_ref": 1}],
                 "threads": [{"name": "RLVR for agents", "update": "新进展 [1]"}],
                 "items": [{"id": i, "tldr": f"要点{i}", "detail": "收藏总结" if i == ids[-1] else ""} for i in ids]}
 
@@ -122,9 +122,14 @@ class FakeNotion:
         self.pages, self.updated, self.replaced = [], [], None
 
     def children_pis(self):
-        return [{"id": "prof", "type": "child_page", "child_page": {"title": "🧭 研究画像"}},
-                {"id": "mem", "type": "child_page", "child_page": {"title": "🧠 记忆"}},
-                {"id": "db", "type": "child_database", "child_database": {"title": "📥 Inbox"}}]
+        return [{"id": "prof", "type": "child_page", "child_page": {"title": "研究画像"}},
+                {"id": "mem", "type": "child_page", "child_page": {"title": "🧠 记忆"}},   # legacy title -> renamed
+                {"id": "db", "type": "child_database", "child_database": {"title": "Inbox"}}]
+
+    def req(self, method, path, json=None):
+        assert (method, path) == ("PATCH", "/pages/mem") and json["properties"]["title"]["title"][0]["text"]["content"] == "记忆"
+        self.renamed = True
+        return {}
 
     def find_child_page(self, parent, title):
         return "day-1030" if (parent, title) == ("pis", "2026-10-30") else None
@@ -213,6 +218,8 @@ def test_end_to_end(monkeypatch, tmp_path):
     assert pid == "mem" and mem["interests"][0]["topic"] == "Agent 评测"
     assert mem["feedback_seen"] == ["https://arxiv.org/abs/2610.0"]
     assert mem["recent_headlines"][-1] == "2026-10-31：RLVR 走向 Agent"
+    assert fake.renamed
+    assert sum(b["type"] == "bookmark" for b in main) == 1    # same key item is not bookmarked twice
     assert fake.updated and fake.updated[0][1]["Processed"]["checkbox"] is True
     assert "Agent 评测新基准" in fake.updated[0][1]["Name"]["title"][0]["text"]["content"]
     md = (M.ROOT / "out" / "2026-10-31.md").read_text()
@@ -249,7 +256,7 @@ def test_bootstrap_creates_missing(tmp_path):
     import yaml
     cfg = yaml.safe_load((root / "config" / "sources.yaml").read_text())
     ids = bootstrap.ensure(N0(), cfg, root)
-    assert created == ["🧭 研究画像", "🧠 记忆", "db"] and ids["inbox"] == "new-db"
+    assert created == ["研究画像", "记忆", "db"] and ids["inbox"] == "new-db"
 
 
 def test_model_fallback(monkeypatch):

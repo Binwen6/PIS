@@ -53,7 +53,8 @@ def main_blocks(date_title: str, d: dict, numbered: list[tuple[int, Item]], stat
     links = {n: it.url for n, it in numbered}
     cite = lambda t, **kw: N.rich_with_citations(t, links, **kw)  # noqa: E731
 
-    blocks = [N.callout(N.rich(d.get("headline") or "今日简报", bold=True), "📌", "blue_background")]
+    blocks = [N.callout([{**t, "annotations": {**t.get("annotations", {}), "bold": True}}
+                         for t in cite(d.get("headline") or "今日简报")], "📌", "blue_background")]
     if d.get("takeaways"):
         c = N.callout(N.rich("30 秒速览", bold=True), "⏱", "yellow_background")
         c["callout"]["children"] = [N.bullet(cite(t)) for t in d["takeaways"]]
@@ -61,13 +62,15 @@ def main_blocks(date_title: str, d: dict, numbered: list[tuple[int, Item]], stat
     if len(d.get("themes", [])) > 1:
         blocks.append(N.toc())
 
+    bookmarked: set[int] = set()
     for th in d.get("themes", []):
         blocks.append(N.heading(f"{th.get('emoji', '')} {th.get('title', '')}".strip(), 2))
         blocks.append(N.paragraph(cite(th.get("body", ""))))
         if th.get("so_what"):
             blocks.append(N.quote(N.rich("💬 对你：", bold=True) + cite(th["so_what"]), color="brown"))
         key = items.get(th.get("key_ref"))
-        if key:
+        if key and th["key_ref"] not in bookmarked:
+            bookmarked.add(th["key_ref"])
             blocks.append(N.bookmark(key.extra.get("hf_url") or key.url))
 
     if d.get("threads"):
