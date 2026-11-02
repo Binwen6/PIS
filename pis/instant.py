@@ -27,7 +27,8 @@ from .sources import notion_inbox
 from . import bootstrap, classify, deepdive, notion as N, render
 from .main import ROOT, load_profile
 
-PLACEHOLDER = "☀️ 今日简报（arXiv 新论文与综合摘要）会在早上自动生成，放在这里。"
+PLACEHOLDER = "今日简报（arXiv 新论文与综合摘要）会在早上自动生成，放在这里。"
+_MARK = "今日简报（arXiv"      # also matches pages created with the older "☀️ 今日简报…" text
 SECTION = "📌 即时收藏"
 
 SUMMARY_SYSTEM = """你会收到用户刚收藏的几篇内容（带类型和用户备注）以及用户的研究画像。为每篇写：
@@ -43,7 +44,7 @@ def is_skeleton(notion: Notion, page_id: str) -> str | None:
     for b in notion.children(page_id)[:3]:
         if b["type"] == "callout":
             text = "".join(t.get("plain_text", "") for t in b["callout"]["rich_text"])
-            if text.startswith(PLACEHOLDER[:6]):
+            if _MARK in text:
                 return b["id"]
     return None
 
