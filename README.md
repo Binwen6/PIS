@@ -71,6 +71,19 @@ DEEPSEEK_API_KEY=sk-xxx python -m pis.main --dry-run
 - **电脑端**：Notion Web Clipper 保存到 Inbox。
 - 可在 `Note` 字段写一句“为什么收藏”，摘要会参考它。
 
+### 存入后立即处理（可选，推荐）
+在快捷指令「✅ 已存入」通知之后再加一个「获取 URL 内容」动作，触发 GitHub 上的即时处理工作流：
+- URL：`https://api.github.com/repos/Binwen6/PIS/actions/workflows/inbox.yml/dispatches`
+- 方法：POST；头部：`Authorization` = `Bearer <GitHub 令牌>`、`Accept` = `application/vnd.github+json`
+- 请求体：JSON，一个字段 `ref` = `main`（成功时返回空内容，状态码 204）
+
+GitHub 令牌：Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token，
+Repository access 只选 `Binwen6/PIS`，Permissions 里把 **Actions** 设为 Read and write，其他都不给。
+
+触发后几分钟内，这篇文章会被分类、查找原论文、写好深度解析，并追加到下一期简报页面的「📌 即时收藏」下
+（当天早上的简报还没生成就放今天，已经生成就放明天）。第二天早上的运行只把它们作为综合摘要的上下文，不再重复处理。
+没触发成功的链接，会在早上照常完整处理。
+
 ## 接入更多社交平台
 在 `config/sources.yaml` 的 `feeds.list` 里加 RSS 地址即可：
 - **X / 知乎 / 小红书**：自建 [RSSHub](https://docs.rsshub.app)（需各平台 cookie，小红书/知乎反爬强，路由时常失效）。
