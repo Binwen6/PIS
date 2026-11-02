@@ -1,7 +1,8 @@
 """Notion「📥 Inbox」database: links you saved by hand (公众号 / 小红书 / 知乎 / anything).
 
-Expected properties (created by setup_notion.py):
-  Name (title) · URL (url) · Note (rich_text) · Processed (checkbox)
+Properties: Name (title), URL (url), Note (rich_text), Processed (checkbox), plus the ones the instant
+pipeline fills in: 日期 (date of the digest page it went to), 类型 (select), 摘要 (rich_text),
+解析页 (url of the deep dive), 已汇总 (checkbox: already used by a morning digest).
 """
 from __future__ import annotations
 
@@ -56,3 +57,61 @@ def mark_processed(notion: Notion, items: list[Item]) -> None:
                 notion.update_props(it.notion_id, props)
             except Exception as e:  # noqa: BLE001
                 log.warning("mark processed failed for %s: %s", it.url, e)
+
+
+def record_instant(notion: Notion, it: Item, day, kind_label: str, summary: str, deep_id: str | None) -> None:
+    props = {
+        "Processed": {"checkbox": True},
+        "日期": {"date": {"start": day.isoformat()}},
+        "类型": {"select": {"name": kind_label}},
+        "摘要": {"rich_text": [{"text": {"content": (summary or "")[:1900]}}]},
+    }
+    if it.title and it.title != it.url:
+        props["Name"] = {"title": [{"text": {"content": it.title[:200]}}]}
+    if deep_id:
+        props["解析页"] = {"url": f"https://www.notion.so/{deep_id.replace('-', '')}"}
+    try:
+        notion.update_props(it.notion_id, props)
+    except Exception as e:  # noqa: BLE001
+        log.warning("recording instant item %s failed: %s", it.url, e)
+
+
+def fetch_instant(notion: Notion, db_id: str) -> list[Item]:
+    """Items processed instantly but not yet part of a morning digest (context only, no refetch)."""
+    from ..classify import KINDS
+    by_label = {v[0]: k for k, v in KINDS.items()}
+    try:
+        rows = notion.query_db(db_id, {"and": [
+            {"property": "Processed", "checkbox": {"equals": True}},
+            {"property": "已汇总", "checkbox": {"equals": False}},
+            {"property": "日期", "date": {"is_not_empty": True}},
+        ]})
+    except Exception as e:  # noqa: BLE001
+        log.warning("instant items lookup failed: %s", e)
+        return []
+    items = []
+    for row in rows:
+        props = row["properties"]
+        url = canonical_url(_plain(props.get("URL", {})))
+        if not url:
+            continue
+        label = ((props.get("类型") or {}).get("select") or {}).get("name") or "其他"
+        deep_url = _plain(props.get("解析页", {}))
+        deep_id = deep_url.rstrip("/").split("/")[-1].split("-")[-1] if deep_url else ""
+        origin = "微信公众号" if "mp.weixin.qq.com" in url else "我的收藏"
+        items.append(Item(source="inbox", title=_plain(props.get("Name", {})) or url, url=url,
+                          text=_plain(props.get("摘要", {})), note=_plain(props.get("Note", {})),
+                          origin=f"{origin}（{label}）", notion_id=row["id"],
+                          extra={k: v for k, v in {"kind": by_label.get(label, "other"), "instant": True,
+                                                   "deep": deep_id}.items() if v}))
+    log.info("Notion inbox: %d items already processed instantly", len(items))
+    return items
+
+
+def mark_digested(notion: Notion, items: list[Item]) -> None:
+    for it in items:
+        if it.notion_id:
+            try:
+                notion.update_props(it.notion_id, {"已汇总": {"checkbox": True}})
+            except Exception as e:  # noqa: BLE001
+                log.warning("mark digested failed for %s: %s", it.url, e)

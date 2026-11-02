@@ -66,6 +66,15 @@ class Notion:
         for i in range(0, len(blocks), 100):
             self.req("PATCH", f"/blocks/{block_id}/children", json={"children": blocks[i:i + 100]})
 
+    def insert_after(self, parent_id: str, after_id: str, blocks: list[dict]) -> None:
+        """Insert blocks right after an existing child block (keeps them above anything that follows)."""
+        for i in range(0, len(blocks), 100):
+            chunk = blocks[i:i + 100]
+            d = self.req("PATCH", f"/blocks/{parent_id}/children", json={"children": chunk, "after": after_id})
+            res = d.get("results", [])
+            if len(res) >= len(chunk):
+                after_id = res[len(chunk) - 1]["id"] if res[0].get("type") == chunk[0]["type"] else res[-1]["id"]
+
     def delete_block(self, block_id: str) -> None:
         self.req("DELETE", f"/blocks/{block_id}")
 

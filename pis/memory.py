@@ -83,18 +83,20 @@ def collect_feedback(notion: Notion | None, parent: str, today: date, mem: dict,
             day_id = notion.find_child_page(parent, (today - timedelta(days=k)).isoformat())
             if not day_id:
                 continue
-            for sub in notion.children(day_id):
-                if sub["type"] != "child_page":
-                    continue
-                for b in notion.children(sub["id"]):
-                    if b["type"] == "to_do" and b["to_do"].get("checked"):
-                        rt = b["to_do"]["rich_text"]
-                        text = "".join(t.get("plain_text", "") for t in rt)
-                        url = next((t["href"] for t in rt if t.get("href")), text)
-                        if url not in seen:
-                            seen.add(url)
-                            found.append(text.strip())
-                            mem.setdefault("feedback_seen", []).append(url)
+            top = notion.children(day_id)
+            blocks = [b for b in top if b["type"] == "to_do"]          # instant items live on the page itself
+            for sub in top:
+                if sub["type"] == "child_page":
+                    blocks += notion.children(sub["id"])
+            for b in blocks:
+                if b["type"] == "to_do" and b["to_do"].get("checked"):
+                    rt = b["to_do"]["rich_text"]
+                    text = "".join(t.get("plain_text", "") for t in rt)
+                    url = next((t["href"] for t in rt if t.get("href")), text)
+                    if url not in seen:
+                        seen.add(url)
+                        found.append(text.strip())
+                        mem.setdefault("feedback_seen", []).append(url)
         except Exception as e:  # noqa: BLE001
             log.warning("feedback scan failed for day -%d: %s", k, e)
     mem["feedback_seen"] = mem.get("feedback_seen", [])[-300:]

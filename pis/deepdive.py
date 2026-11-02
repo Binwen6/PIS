@@ -252,6 +252,8 @@ def pick(numbered: list[tuple[int, Item]], cfg: dict) -> list[tuple[int, Item]]:
     """Inbox items first (your explicit interest), then the highest-scoring papers."""
     inbox, papers = [], []
     for n, it in numbered:
+        if it.extra.get("instant"):
+            continue
         if it.source == "inbox" and cfg.get("include_inbox", True):
             kind = it.extra.setdefault("kind", "other")
             if kind == "paper" and not it.extra.get("arxiv_id"):

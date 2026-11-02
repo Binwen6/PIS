@@ -95,6 +95,12 @@ def ensure(notion: Notion, cfg: dict, root: Path) -> dict[str, str]:
         "properties": {"Name": {"title": {}}, "URL": {"url": {}}, "Note": {"rich_text": {}},
                        "Processed": {"checkbox": {}}},
     })["id"]
+    try:   # columns used by instant processing (idempotent)
+        notion.req("PATCH", f"/databases/{ids['inbox']}", json={"properties": {
+            "日期": {"date": {}}, "类型": {"select": {}}, "摘要": {"rich_text": {}},
+            "解析页": {"url": {}}, "已汇总": {"checkbox": {}}}})
+    except RuntimeError as e:
+        log.warning("adding Inbox columns failed: %s", e)
     lib_found = existing(dbs, LIBRARY_TITLE, "db")
     if lib_found:
         try:   # libraries created before the 类型 column existed

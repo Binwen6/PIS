@@ -76,12 +76,15 @@ def run(args) -> int:
         return 2
     ids = bootstrap.ensure(notion, cfg, ROOT) if notion else {}
     parent = ids.get("pis", "")
-    existing = None
+    existing, placeholder = None, None
     if not args.dry_run:
         existing = notion.find_child_page(parent, title)
         if existing and not args.force:
-            log.info("page %s already exists, nothing to do (use --force to rebuild)", title)
-            return 0
+            from .instant import is_skeleton
+            placeholder = is_skeleton(notion, existing)      # page pre-created by instant Inbox runs
+            if not placeholder:
+                log.info("page %s already exists, nothing to do (use --force to rebuild)", title)
+                return 0
 
     profile = load_profile(notion, ids.get("profile"))
     mem_page = ids.get("memory")
@@ -93,7 +96,8 @@ def run(args) -> int:
 
     llm = LLM(cfg["llm"]["base_url"], cfg["llm"]["model"], fallbacks=cfg["llm"].get("fallback_models", []))
     papers, news, inbox = gather(cfg, notion, ids.get("inbox"), now, today)
-    classify.classify(llm, inbox)
+    classify.classify(llm, inbox)            # links saved without the instant trigger
+    instant = notion_inbox.fetch_instant(notion, ids["inbox"]) if notion and ids.get("inbox") else []
 
     acfg, fcfg, lcfg = cfg.get("arxiv", {}), cfg.get("feeds", {}), cfg["llm"]
     n_papers_raw = len(papers)
@@ -102,10 +106,10 @@ def run(args) -> int:
     top_papers = rank.select(papers, acfg.get("min_score", 6), acfg.get("max_in_digest", 15))
     top_news = rank.select(news, fcfg.get("min_score", 6), fcfg.get("max_in_digest", 10))
 
-    numbered = list(enumerate(top_papers + top_news + inbox, start=1))
+    numbered = list(enumerate(top_papers + top_news + inbox + instant, start=1))
     d = make_digest(llm, context, numbered, cfg["llm"].get("digest_max_tokens", 32768))
     stats = (f"arXiv/HF 共 {n_papers_raw} 篇 → 精选 {len(top_papers)} 篇；动态 {len(news)} 条 → 精选 {len(top_news)} 条；"
-             f"收藏 {len(inbox)} 条；模型 {llm.model}；tokens 入 {llm.usage['prompt_tokens']} / 出 {llm.usage['completion_tokens']}")
+             f"收藏 {len(inbox) + len(instant)} 条；模型 {llm.model}；tokens 入 {llm.usage['prompt_tokens']} / 出 {llm.usage['completion_tokens']}")
 
     out_dir = ROOT / "out"
     out_dir.mkdir(exist_ok=True)
@@ -124,19 +128,27 @@ def run(args) -> int:
             deep = deepdive.run(llm, notion, ids["library"], profile, numbered, today, dcfg)
         except Exception as e:  # noqa: BLE001 - deep dives are a bonus; never lose the digest
             log.error("deep dives failed: %s", e)
+    deep.update({n: it.extra["deep"] for n, it in numbered if it.extra.get("instant") and it.extra.get("deep")})
     stats = (stats.split("；tokens")[0] + f"；深度解析 {len(deep)} 篇；tokens 入 {llm.usage['prompt_tokens']}"
              f" / 出 {llm.usage['completion_tokens']}")
 
-    page_id = notion.create_page(parent, title, render.main_blocks(title, d, numbered, stats, deep), emoji="📰")
-    for sub_title, emoji, blocks in render.group_pages(numbered, d, deep):
+    main_blocks = render.main_blocks(title, d, numbered, stats, deep)
+    if placeholder:     # instant items are already below the placeholder: put the digest above them
+        page_id = existing
+        notion.insert_after(page_id, placeholder, main_blocks)
+        notion.delete_block(placeholder)
+    else:
+        page_id = notion.create_page(parent, title, main_blocks, emoji="📰")
+    for sub_title, emoji, blocks in render.group_pages(numbered, d, deep, skip_instant=bool(placeholder)):
         notion.create_page(page_id, sub_title, blocks, emoji=emoji)
-    if existing:   # only replace the old page once the new one exists
+    if existing and not placeholder:   # forced rebuild: replace the old page once the new one exists
         notion.archive(existing)
     notion_inbox.mark_processed(notion, inbox)
+    notion_inbox.mark_digested(notion, inbox + instant)
 
     if mem_page:   # learn from today's behaviour signals; failure here never loses the digest
         try:
-            mem = memory.update(llm, profile, mem, today, inbox, ticked, d)
+            mem = memory.update(llm, profile, mem, today, inbox + instant, ticked, d)
             notion.replace_content(mem_page, memory.blocks(mem, today))
             log.info("memory updated: %d interests, %d threads", len(mem["interests"]), len(mem["threads"]))
         except Exception as e:  # noqa: BLE001

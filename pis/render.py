@@ -116,11 +116,11 @@ def item_blocks(n: int, it: Item, d: dict, deep: dict[int, str] | None = None) -
     return [N.todo(head, kids)]
 
 
-def group_pages(numbered: list[tuple[int, Item]], d: dict,
-                deep: dict[int, str] | None = None) -> list[tuple[str, str, list[dict]]]:
+def group_pages(numbered: list[tuple[int, Item]], d: dict, deep: dict[int, str] | None = None,
+                skip_instant: bool = False) -> list[tuple[str, str, list[dict]]]:
     pages = []
     for _, title, pred in GROUPS:
-        rows = [(n, it) for n, it in numbered if pred(it)]
+        rows = [(n, it) for n, it in numbered if pred(it) and not (skip_instant and it.extra.get("instant"))]
         if not rows:
             continue
         blocks: list[dict] = [N.callout(N.rich("☑ 勾选 = 想深读 / 感兴趣，这会成为你的兴趣信号。"), "🎯", "gray_background")]

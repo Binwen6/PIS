@@ -107,6 +107,9 @@ class FakeLLM:
         return "## 1. 研究问题与价值\n读取搭档的 $h_t$ 隐状态。\n$$\n\\min_R \\|A-RB\\|\n$$\n- 要点\n" + "正文" * 100
 
     def json(self, system, user, **kw):
+        if "刚收藏" in system:
+            ids = [int(x) for x in re.findall(r"^\[(\d+)\]", user.split("# 新收藏")[-1], re.M)]
+            return {"items": [{"id": i, "tldr": f"一句话{i}", "detail": f"细节{i}"} for i in ids]}
         if "判断用户收藏" in system:
             chunks = re.split(r"^\[(\d+)\] ", user, flags=re.M)[1:]
             return {"items": [{"id": int(i), "kind": "repo" if "GitHub" in c else "paper", "why": "x"}
@@ -170,7 +173,7 @@ class FakeNotion:
 
     def req(self, method, path, json=None):
         self.reqs = getattr(self, "reqs", []) + [(method, path, json)]
-        assert method == "PATCH" and path in ("/pages/mem", "/databases/lib"), path
+        assert method == "PATCH" and path in ("/pages/mem", "/databases/lib", "/databases/db"), path
         return {}
 
     def find_child_page(self, parent, title):
@@ -317,6 +320,9 @@ def test_bootstrap_creates_missing(tmp_path):
             return "new-" + title
 
         def req(self, method, path, json=None):
+            if method == "PATCH":                       # new Inbox columns
+                assert path == "/databases/new-Inbox" and "已汇总" in json["properties"]
+                return {}
             assert path == "/databases" and json["parent"]["page_id"] == "40ad4b61-755e-80b0-a159-f34c3f246739"
             created.append(json["title"][0]["text"]["content"])
             return {"id": "new-" + json["title"][0]["text"]["content"]}
@@ -510,3 +516,119 @@ def test_canonical_wechat_url():
     from pis.web import canonical_url
     assert canonical_url("https://mp.weixin.qq.com/s/0Hz9v_KW-iv?from=singlemessage&scene=1") == "https://mp.weixin.qq.com/s/0Hz9v_KW-iv"
     assert canonical_url("https://arxiv.org/abs/2610.1?x=1") == "https://arxiv.org/abs/2610.1?x=1"
+
+
+class InstantNotion(FakeNotion):
+    """Day pages by title; Inbox rows split into unprocessed vs processed-instantly."""
+
+    def __init__(self, pages=None, children_map=None, instant_rows=None):
+        super().__init__()
+        self.day_pages = dict(pages or {})
+        self.kids = dict(children_map or {})
+        self.instant_rows = instant_rows or []
+        self.appended, self.inserted, self.deleted = [], [], []
+
+    def find_child_page(self, parent, title):
+        return self.day_pages.get(title)
+
+    def children(self, bid):
+        if bid in self.kids:
+            return self.kids[bid]
+        return super().children(bid)
+
+    def create_page(self, parent, title, blocks, emoji="📰"):
+        pid = super().create_page(parent, title, blocks, emoji)
+        if parent == "pis":
+            self.day_pages[title] = pid
+            self.kids[pid] = [dict(b, id=f"{pid}-b{i}") for i, b in enumerate(blocks)]
+        return pid
+
+    def append(self, pid, blocks):
+        check_blocks(blocks)
+        self.appended.append((pid, blocks))
+
+    def insert_after(self, pid, after, blocks):
+        check_blocks(blocks)
+        self.inserted.append((pid, after, blocks))
+
+    def delete_block(self, bid):
+        self.deleted.append(bid)
+
+    def query_db(self, db, f=None, sorts=None):
+        if db == "db" and f and "and" in f:
+            return self.instant_rows
+        return super().query_db(db, f, sorts)
+
+
+def _instant_env(monkeypatch, tmp_path, fake, hour_utc=2):
+    from datetime import datetime, timezone
+    from pis import instant as I, main as M2
+    monkeypatch.setattr(common.requests, "get", fake_get)
+    monkeypatch.setattr(I, "LLM", FakeLLM)
+    monkeypatch.setattr(I, "Notion", lambda *a, **k: fake)
+    monkeypatch.setattr(I, "utcnow", lambda: datetime(2026, 10, 31, hour_utc, tzinfo=timezone.utc))
+    monkeypatch.setattr(I, "ROOT", _root_copy(tmp_path))
+    monkeypatch.setattr(M2, "ROOT", I.ROOT)
+    for k, v in {"NOTION_TOKEN": "x", "NOTION_PIS_PAGE_ID": "pis", "DEEPSEEK_API_KEY": "k"}.items():
+        monkeypatch.setenv(k, v)
+    return I
+
+
+def test_instant_goes_to_todays_page_before_the_digest(monkeypatch, tmp_path):
+    fake = InstantNotion()
+    I = _instant_env(monkeypatch, tmp_path, fake)
+    assert I.run() == 0
+    assert fake.day_pages == {"2026-10-31": "page-1"}                    # skeleton for today
+    skel = fake.pages[0][2]
+    assert skel[0]["type"] == "callout" and skel[0]["callout"]["rich_text"][0]["text"]["content"] == I.PLACEHOLDER
+    pid, blocks = fake.appended[0]
+    assert pid == "page-1" and [b["type"] for b in blocks] == ["to_do", "to_do"]
+    kids = blocks[0]["to_do"]["children"]
+    assert kids[0]["paragraph"]["rich_text"][0]["text"]["content"] == "一句话0"
+    assert any(k["type"] == "link_to_page" for k in kids)
+    rec = {p: props for p, props in fake.updated}
+    assert rec["row1"]["Processed"]["checkbox"] and rec["row1"]["日期"]["date"]["start"] == "2026-10-31"
+    assert rec["row2"]["类型"]["select"]["name"] == "开源项目" and "解析页" in rec["row2"]
+    assert rec["row1"]["摘要"]["rich_text"][0]["text"]["content"] == "一句话0 细节0"
+
+
+def test_instant_goes_to_tomorrow_after_the_digest(monkeypatch, tmp_path):
+    filled = [{"id": "x", "type": "callout", "callout": {"rich_text": [{"plain_text": "PRH 成定理"}]}}]
+    fake = InstantNotion(pages={"2026-10-31": "day-1031"}, children_map={"day-1031": filled})
+    I = _instant_env(monkeypatch, tmp_path, fake, hour_utc=10)
+    assert I.run() == 0
+    assert fake.day_pages["2026-11-01"] == "page-1" and fake.appended[0][0] == "page-1"
+
+
+def test_morning_run_fills_the_skeleton(monkeypatch, tmp_path):
+    from pis import instant as I
+    skeleton = [{"id": "ph", "type": "callout", "callout": {"rich_text": [{"plain_text": I.PLACEHOLDER}]}},
+                {"id": "dv", "type": "divider", "divider": {}}]
+    instant_row = {"id": "row9", "properties": {
+        "Name": {"type": "title", "title": [{"plain_text": "提前收藏的论文"}]},
+        "URL": {"type": "url", "url": "https://mp.weixin.qq.com/s/early"},
+        "Note": {"type": "rich_text", "rich_text": [{"plain_text": "早上之前存的"}]},
+        "摘要": {"type": "rich_text", "rich_text": [{"plain_text": "它做了 X"}]},
+        "类型": {"type": "select", "select": {"name": "论文"}},
+        "解析页": {"type": "url", "url": "https://www.notion.so/abc123"}}}
+    fake = InstantNotion(pages={"2026-10-31": "day-1031"}, children_map={"day-1031": skeleton},
+                         instant_rows=[instant_row])
+    fake.kids["pis"] = fake.children_pis()
+    monkeypatch.setattr(common.requests, "get", fake_get)
+    monkeypatch.setattr(M, "LLM", FakeLLM)
+    monkeypatch.setattr(M, "Notion", lambda *a, **k: fake)
+    for k, v in {"NOTION_TOKEN": "x", "NOTION_PIS_PAGE_ID": "pis", "DEEPSEEK_API_KEY": "k"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(M, "ROOT", _root_copy(tmp_path))
+    assert M.run(types.SimpleNamespace(dry_run=False, force=False, date="2026-10-31")) == 0
+
+    assert [t for p, t, _ in fake.pages if p == "pis"] == []              # no new day page
+    pid, after, blocks = fake.inserted[0]
+    assert (pid, after) == ("day-1031", "ph") and blocks[0]["type"] == "callout"
+    assert fake.deleted == ["ph"]
+    subs = [t for p, t, _ in fake.pages if p == "day-1031"]
+    assert "我的收藏（2）" in subs                                          # leftovers only; instant item is on the page
+    table = next(b for b in blocks if b["type"] == "toggle" and "全部条目" in b["toggle"]["rich_text"][0]["text"]["content"])
+    rows = table["toggle"]["children"][0]["table"]["children"]
+    assert any("提前收藏的论文" in c[0]["text"]["content"] for r in rows for c in r["table_row"]["cells"][1:2])
+    assert ("row9", {"已汇总": {"checkbox": True}}) in fake.updated

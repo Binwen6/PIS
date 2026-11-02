@@ -1,0 +1,30 @@
+name: PIS inbox (instant)
+
+# Triggered by the iOS shortcut right after a link is saved to the Notion Inbox
+# (POST /repos/Binwen6/PIS/actions/workflows/inbox.yml/dispatches {"ref": "main"}).
+# Processes every unprocessed Inbox link and appends it to the next digest page.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: pis-inbox          # separate from the daily run, so a burst of saves never cancels the digest
+  cancel-in-progress: false # a queued run picks up everything saved meanwhile
+
+jobs:
+  inbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Process new Inbox links
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API }}
+          NOTION_TOKEN: ${{ secrets.PERSONAL_INFORMATION_SOURCE }}
+          DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m pis.instant
