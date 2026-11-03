@@ -1,0 +1,18 @@
+name: tmp fetch paper
+on:
+  push:
+    branches: [tmp-paper-fetch]
+jobs:
+  f:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q beautifulsoup4 && curl -sL https://arxiv.org/html/2608.05000 -o p.html && python3 extract.py && wc -c g*.txt
+      - name: g1
+        run: python3 -c "t=open('g1_laziness.txt').read(); [print('::notice title=g1_'+str(i)+'::'+t[i*3500:(i+1)*3500].replace('%','%25').replace('\n','%0A')) for i in range(min(10,(len(t)+3499)//3500))]"
+      - name: g2
+        run: python3 -c "t=open('g2_compute.txt').read(); [print('::notice title=g2_'+str(i)+'::'+t[i*3500:(i+1)*3500].replace('%','%25').replace('\n','%0A')) for i in range(min(10,(len(t)+3499)//3500))]"
+      - name: g3
+        run: python3 -c "t=open('g3_lr.txt').read(); [print('::notice title=g3_'+str(i)+'::'+t[i*3500:(i+1)*3500].replace('%','%25').replace('\n','%0A')) for i in range(min(10,(len(t)+3499)//3500))]"
+      - name: g4
+        run: python3 -c "t=open('g4_lambda.txt').read(); [print('::notice title=g4_'+str(i)+'::'+t[i*3500:(i+1)*3500].replace('%','%25').replace('\n','%0A')) for i in range(min(10,(len(t)+3499)//3500))]"
