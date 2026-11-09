@@ -102,6 +102,7 @@ class FakeLLM:
             assert "Stars：42" in user and "pip install bar" in user          # GitHub metadata + README fed in
             return "## 1. 它解决什么问题\n共享 KV cache。\n```bash\npip install bar\n```\n" + "说明" * 100
         assert "深度解读" in system and "## 12. Follow-up Idea" in system
+        assert "AGENTS 测试规则" in system
         assert "$z_a = R z_b$" in user and "REFS" not in user          # LaTeX kept, bibliography dropped
         self.deep_calls = getattr(self, "deep_calls", 0) + 1
         return "## 1. 研究问题与价值\n读取搭档的 $h_t$ 隐状态。\n$$\n\\min_R \\|A-RB\\|\n$$\n- 要点\n" + "正文" * 100
@@ -117,17 +118,20 @@ class FakeLLM:
         body = user.split("# 待评分条目")[-1].split("# 今日条目")[-1]
         ids = [int(x) for x in re.findall(r"^\[(\d+)\]", body, re.M)]
         if "评分" in system:
+            assert "最近主动收藏" in user and "Agent 评测新基准" in user        # saves shape today's ranking
             return {"results": [{"id": i, "score": 2 if "Cats" in body.split(f"[{i}]")[1][:80] else 8,
                                  "why": "命中 RL 推理"} for i in ids]}
         if "动态兴趣记忆" in system:
             assert "Agent 评测新基准" in user and "Old ticked paper" in user     # inbox + ticked are fed in
-            assert "[开源项目]" in user
+            assert "[开源项目]" in user and "最强信号" in user
+            assert "AGENTS 测试规则" in system
             return {"interests": [{"topic": "Agent 评测", "weight": 4, "trend": "up", "evidence": "收藏+勾选",
                                    "last_seen": "2026-10-31"}],
                     "threads": [{"name": "RLVR for agents", "summary": "GRPO 扩展到 agent", "last_seen": "2026-10-31"}],
                     "preferences": ["偏好有代码"], "notes": "从推理转向 agent 评测"}
         assert "动态记忆" in user and "RLVR for agents" in user                   # memory reaches the digest prompt
         assert "类型：开源项目" in user and "类型：论文" in user                  # saved items carry their kind
+        assert "AGENTS 测试规则" in system
         assert "昨天头条" in user and "同日旧头条" not in user                     # same-day rebuild ignores own headline
         return {"headline": "RLVR 走向 Agent [1]", "takeaways": ["**GRPO** 用于 `Agent` [1]", "收藏 [4]"],
                 "themes": [{"emoji": "🧠", "title": "推理", "body": "讨论 [1][4]，以及不存在的 [99]。",
@@ -163,7 +167,8 @@ class FakeNotion:
         return [{"id": "prof", "type": "child_page", "child_page": {"title": "研究画像"}},
                 {"id": "mem", "type": "child_page", "child_page": {"title": "🧠 记忆"}},   # legacy title -> renamed
                 {"id": "db", "type": "child_database", "child_database": {"title": "Inbox"}},
-                {"id": "lib", "type": "child_database", "child_database": {"title": "论文库"}}]   # legacy -> 知识库
+                {"id": "lib", "type": "child_database", "child_database": {"title": "论文库"}},   # legacy -> 知识库
+                {"id": "agents", "type": "child_page", "child_page": {"title": "AGENTS.md"}}]
 
     def create_db_page(self, db, props, blocks, emoji=""):
         check_blocks(blocks)
@@ -200,6 +205,8 @@ class FakeNotion:
         self.replaced = (pid, blocks)
 
     def page_text(self, pid):
+        if pid == "agents":
+            return "禁止使用双破折号的句式（AGENTS 测试规则）"
         return "## 核心兴趣\n- reinforcement learning, reasoning, agents"
 
     def create_page(self, parent, title, blocks, emoji="📰"):
@@ -632,3 +639,17 @@ def test_morning_run_fills_the_skeleton(monkeypatch, tmp_path):
     rows = table["toggle"]["children"][0]["table"]["children"]
     assert any("提前收藏的论文" in c[0]["text"]["content"] for r in rows for c in r["table_row"]["cells"][1:2])
     assert ("row9", {"已汇总": {"checkbox": True}}) in fake.updated
+
+
+def test_page_text_reads_nested_blocks():
+    from pis.notion import Notion
+    tree = {
+        "p": [{"id": "a", "type": "heading_2", "has_children": False, "heading_2": {"rich_text": [{"plain_text": "禁绝格式主义"}]}},
+              {"id": "b", "type": "bulleted_list_item", "has_children": True,
+               "bulleted_list_item": {"rich_text": [{"plain_text": "垃圾内容"}]}}],
+        "b": [{"id": "c", "type": "bulleted_list_item", "has_children": False,
+               "bulleted_list_item": {"rich_text": [{"plain_text": "不要加共识性内容"}]}}],
+    }
+    n = Notion.__new__(Notion)
+    n.children = lambda bid: tree.get(bid, [])
+    assert n.page_text("p") == "## 禁绝格式主义\n- 垃圾内容\n  - 不要加共识性内容"

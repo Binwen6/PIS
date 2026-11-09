@@ -23,7 +23,7 @@ from .common import GitHubAnnotations, Item, log, utcnow
 from .digest import make_digest
 from .llm import LLM
 from .notion import Notion
-from . import bootstrap, classify, deepdive, memory, rank, render
+from . import bootstrap, classify, deepdive, memory, rank, render, style
 from .sources import arxiv, feeds, hf_daily, notion_inbox
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -87,6 +87,7 @@ def run(args) -> int:
                 return 0
 
     profile = load_profile(notion, ids.get("profile"))
+    style.load_agents(notion, ids.get("agents"))
     mem_page = ids.get("memory")
     mem = memory.load(notion, mem_page)
     ticked = memory.collect_feedback(notion, parent, today, mem) if mem_page else []
@@ -98,6 +99,10 @@ def run(args) -> int:
     papers, news, inbox = gather(cfg, notion, ids.get("inbox"), now, today)
     classify.classify(llm, inbox)            # links saved without the instant trigger
     instant = notion_inbox.fetch_instant(notion, ids["inbox"]) if notion and ids.get("inbox") else []
+    if inbox or instant:   # the user's own saves: strongest interest signal, used for today's ranking too
+        context += "\n\n# 用户最近主动收藏的内容（最能反映真实兴趣，比勾选更强）\n" + "\n".join(
+            f"- [{classify.label(it)}] {it.title}" + (f"（备注：{it.note}）" if it.note else "")
+            + (f"：{it.text}" if it.extra.get("instant") and it.text else "") for it in inbox + instant)
 
     acfg, fcfg, lcfg = cfg.get("arxiv", {}), cfg.get("feeds", {}), cfg["llm"]
     n_papers_raw = len(papers)

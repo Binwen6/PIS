@@ -79,6 +79,9 @@ def ensure(notion: Notion, cfg: dict, root: Path) -> dict[str, str]:
         return old
 
     ids = {"pis": pis}
+    agents = next((pid for t, pid in pages.items() if t.strip().lower() == "agents.md"), None)
+    if agents:
+        ids["agents"] = agents
     ids["profile"] = os.environ.get("NOTION_PROFILE_PAGE_ID") or existing(pages, PROFILE_TITLE, "page") or notion.create_page(
         pis, PROFILE_TITLE,
         [N.callout(N.rich("这是你的长期研究画像。直接编辑本页即可，下次运行自动生效。写得越具体，筛选越准。"), "✏️")]

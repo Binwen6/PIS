@@ -22,9 +22,9 @@ import yaml
 from .common import GitHubAnnotations, Item, log, utcnow
 from .llm import LLM
 from .notion import Notion
-from .style import WRITING_STYLE, sanitize_obj
+from .style import rules, sanitize_obj
 from .sources import notion_inbox
-from . import bootstrap, classify, deepdive, notion as N, render
+from . import bootstrap, classify, deepdive, notion as N, render, style
 from .main import ROOT, load_profile
 
 PLACEHOLDER = "今日简报（arXiv 新论文与综合摘要）会在早上自动生成，放在这里。"
@@ -34,9 +34,7 @@ SECTION = "📌 即时收藏"
 SUMMARY_SYSTEM = """你会收到用户刚收藏的几篇内容（带类型和用户备注）以及用户的研究画像。为每篇写：
 - tldr：一句话说清它是什么，以及最重要的结论或用途（不超过 60 字）
 - detail：3 到 4 句消化后的总结。论文讲问题、方法和关键结果；工具讲用途和上手方式；技巧讲具体做法；资讯讲事实和影响。最后一句说明它和用户研究的关系。
-只输出 JSON：{"items": [{"id": 编号, "tldr": "...", "detail": "..."}]}
-
-""" + WRITING_STYLE
+只输出 JSON：{"items": [{"id": 编号, "tldr": "...", "detail": "..."}]}"""
 
 
 def is_skeleton(notion: Notion, page_id: str) -> str | None:
@@ -69,7 +67,7 @@ def summarize(llm: LLM, profile: str, items: list[Item]) -> dict[int, dict]:
     lines = [f"[{i}] {it.title}（{classify.label(it)}）\n" + (f"用户备注：{it.note}\n" if it.note else "") +
              f"正文：{it.text[:12000]}" for i, it in enumerate(items)]
     try:
-        d = sanitize_obj(llm.json(SUMMARY_SYSTEM, f"# 研究画像\n{profile[:3000]}\n\n# 新收藏\n" + "\n\n".join(lines),
+        d = sanitize_obj(llm.json(SUMMARY_SYSTEM + "\n\n" + rules(), f"# 研究画像\n{profile[:3000]}\n\n# 新收藏\n" + "\n\n".join(lines),
                                   temperature=0.3, max_tokens=8000))
         return {int(x["id"]): x for x in d.get("items", []) if "id" in x}
     except Exception as e:  # noqa: BLE001
@@ -101,6 +99,7 @@ def run() -> int:
         log.info("no new Inbox links")
         return 0
     profile = load_profile(notion, ids.get("profile"))
+    style.load_agents(notion, ids.get("agents"))
     llm = LLM(cfg["llm"]["base_url"], cfg["llm"]["model"], fallbacks=cfg["llm"].get("fallback_models", []))
     classify.classify(llm, items)
     day, page = target_page(notion, ids["pis"], today)

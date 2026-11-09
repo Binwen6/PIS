@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from .common import Item, log
-from .style import WRITING_STYLE, sanitize_obj
+from . import style
+from .style import sanitize_obj
 from .llm import LLM
 
 DIGEST_SYSTEM = """你是这位研究者的私人科研情报编辑，也是同领域的资深同行。你会收到：
@@ -72,7 +73,7 @@ def make_digest(llm: LLM, context: str, numbered: list[tuple[int, Item]], max_to
         d = {"headline": "过去 24 小时没有与你研究方向高度相关的新内容", "takeaways": [], "themes": [], "threads": [], "items": []}
     else:
         try:
-            d = sanitize_obj(llm.json(DIGEST_SYSTEM + "\n\n" + WRITING_STYLE, build_input(context, numbered),
+            d = sanitize_obj(llm.json(DIGEST_SYSTEM + "\n\n" + style.rules(), build_input(context, numbered),
                                       temperature=0.4, max_tokens=max_tokens))
         except Exception as e:  # noqa: BLE001 - an API outage must not cost the whole day's page
             log.error("digest generation failed, publishing items only: %s", e)

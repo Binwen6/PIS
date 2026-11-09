@@ -22,7 +22,7 @@ from .common import GitHubAnnotations, Item, log, utcnow
 from .llm import LLM
 from .notion import Notion
 from .web import canonical_url, fetch_text
-from . import bootstrap, classify, deepdive, notion as N
+from . import bootstrap, classify, deepdive, notion as N, style
 from .main import ROOT, load_profile
 
 _BARE_ID = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
@@ -65,6 +65,7 @@ def run(targets: list[str], day: date | None) -> int:
     notion = Notion()
     ids = bootstrap.ensure(notion, cfg, ROOT)
     profile = load_profile(notion, ids.get("profile"))
+    style.load_agents(notion, ids.get("agents"))
     llm = LLM(cfg["llm"]["base_url"], cfg["llm"]["model"], fallbacks=cfg["llm"].get("fallback_models", []))
 
     items = [to_item(t, notion, ids.get("inbox")) for t in targets]

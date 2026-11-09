@@ -16,6 +16,7 @@ from datetime import date, timedelta
 from .common import Item, log
 from .llm import LLM
 from .notion import Notion
+from . import style
 from . import notion as N
 
 EMPTY = {"interests": [], "threads": [], "preferences": [], "notes": "",
@@ -32,7 +33,7 @@ MEMORY_SYSTEM = """你负责维护一位科研人员的“动态兴趣记忆”�
   "notes": "一句话描述用户近期关注重心的变化"
 }
 规则：
-1. 用户的主动行为（收藏、勾选“想深读”、写备注）权重远高于系统自己推送的内容；仅被推送但没有被勾选的内容不应提高兴趣权重。
+1. 用户主动添加到收藏的内容最能反映真实兴趣，权重最高；其次是在推送里勾选“想深读”；仅被推送但没有被勾选的内容不应提高兴趣权重。
 2. 兴趣点要具体（“RLVR 中的 reward hacking”优于“强化学习”），与长期画像重复的大类不必再写。
 3. 超过 14 天没有新信号的兴趣，trend 设为 down 并降低 weight；weight 降到 0 就删除。线索超过 21 天没有进展就删除。
 4. 不要捏造信号中不存在的事实。interests ≤ 15 条，threads ≤ 8 条，preferences ≤ 6 条。"""
@@ -108,11 +109,12 @@ def update(llm: LLM, profile: str, mem: dict, today: date, inbox: list[Item],
            ticked: list[str], digest: dict) -> dict:
     signals = [f"今天日期：{today.isoformat()}"]
     if inbox:
-        signals.append("## 用户今天主动收藏的内容（强信号）")
+        signals.append("## 用户主动收藏的内容（最强信号）")
         from .classify import label
-        signals += [f"- [{label(it)}] {it.title}" + (f"（用户备注：{it.note}）" if it.note else "") for it in inbox]
+        signals += [f"- [{label(it)}] {it.title}" + (f"（用户备注：{it.note}）" if it.note else "")
+                    + (f"\n  摘要：{it.text}" if it.extra.get("instant") and it.text else "") for it in inbox]
     if ticked:
-        signals.append("## 用户在前几天的推送中勾选了“想深读”（强信号）")
+        signals.append("## 用户在前几天的推送中勾选了“想深读”（强信号，弱于主动收藏）")
         signals += [f"- {t}" for t in ticked]
     signals.append("## 今天推送的主题（弱信号，仅用于更新线索进展）")
     signals += [f"- {th.get('title')}：{th.get('body', '')[:160]}" for th in digest.get("themes", [])]
@@ -121,7 +123,7 @@ def update(llm: LLM, profile: str, mem: dict, today: date, inbox: list[Item],
             + "\n".join(signals))
     try:
         from .style import sanitize_obj
-        new = sanitize_obj(llm.json(MEMORY_SYSTEM, user, temperature=0.2, max_tokens=16000))
+        new = sanitize_obj(llm.json(MEMORY_SYSTEM + "\n\n" + style.rules(), user, temperature=0.2, max_tokens=16000))
     except Exception as e:  # noqa: BLE001
         log.warning("memory update failed, keeping old memory: %s", e)
         new = old

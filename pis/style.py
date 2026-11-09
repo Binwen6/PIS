@@ -16,6 +16,22 @@ WRITING_STYLE = """## 写作要求
 - 用常见的双音节或多音节词，避免翻译腔的单音节词。写“这个/这种”而不是“此/该”，写“所以/因此”而不是“故”，写“需要”而不是“需”，写“只有/仅仅”而不是“仅”，写“它的”而不是“其”，写“都”而不是“均”，写“也”而不是“亦”，写“如果”而不是“若”。英文术语可以直接保留英文，不要硬译成一个单字。
 - 标点只用中文写作里常见的：引号用“”，不要用「」『』；倍数写成“3 倍”，不要写 ×；并列用顿号或逗号，不要用中间圆点；不要用 ✓ ✗ 之类的符号；破折号尽量少用。"""
 
+_AGENTS = [""]
+
+
+def load_agents(notion, page_id: str | None) -> None:
+    """Read the user's AGENTS.md page from Notion; it is appended verbatim to every writing prompt."""
+    if notion and page_id:
+        _AGENTS[0] = notion.page_text(page_id)
+
+
+def rules() -> str:
+    if not _AGENTS[0]:
+        return WRITING_STYLE
+    return (WRITING_STYLE + "\n\n## 用户的工作规范（AGENTS.md）\n以下是用户写给所有协作者的规范，"
+            "其中关于写作的规则适用于你这次的写作；与上面的要求冲突时，以它为准。\n\n" + _AGENTS[0])
+
+
 # keep code, math, inline code and URLs untouched
 _PROTECT = re.compile(r"```.*?```|\$\$.*?\$\$|\$[^$\n]+\$|`[^`\n]+`|https?://\S+", re.S)
 

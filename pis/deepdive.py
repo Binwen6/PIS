@@ -16,7 +16,8 @@ from datetime import date
 from bs4 import BeautifulSoup
 
 from .common import Item, http_get, log
-from .style import WRITING_STYLE, sanitize
+from . import style
+from .style import sanitize
 from . import resolve
 from .llm import LLM
 from .notion import Notion
@@ -65,15 +66,12 @@ PAPER_SYSTEM = """你是一位顶尖的机器学习研究者，正在为一位�
 基于你的知识和分析，提出一个 follow-up idea：要 novel，不是增量研究，从方法缺陷（Limitation）和真实需求出发，说清动机、核心做法和如何验证。
 """
 
-STYLE = WRITING_STYLE + """
-
-## 格式要求
+FORMAT = """## 格式要求
 - 数学公式用 LaTeX：行内用 $...$，独立公式单独成行用 $$...$$。
 - 可以用 **粗体** 标出关键概念，可以用列表；不要用表格，不要用 HTML。
 - 直接从第一个二级标题开始输出，不要写前言或结语。
 - 原文中没有的数字和结论不要编造；如果只拿到了摘要或二手文章，在相关处如实说明哪些是推断。"""
 
-DEEP_SYSTEM = PAPER_SYSTEM + "\n" + STYLE
 
 _READER = "读者是一位 AI 研究者，研究背景附在后面。请为这位读者写一份解析，"
 
@@ -145,9 +143,8 @@ KIND_SYSTEMS = {
 
 
 def system_for(kind: str) -> str:
-    if kind == "paper":
-        return DEEP_SYSTEM
-    return KIND_SYSTEMS.get(kind, KIND_SYSTEMS["other"]) + "\n" + STYLE
+    head = PAPER_SYSTEM if kind == "paper" else KIND_SYSTEMS.get(kind, KIND_SYSTEMS["other"])
+    return head + "\n" + style.rules() + "\n\n" + FORMAT
 
 
 def find_arxiv_id(*texts: str) -> str | None:

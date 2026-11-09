@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .common import Item, log
 from .llm import LLM
+from . import style
 
 _STOP = set("""the and for with from that this into over under using based about via are our their
 these those than then also such more most very can will have has been being your you not use other
@@ -48,7 +49,7 @@ def _score_batch(llm: LLM, profile: str, batch: list[tuple[int, Item]]) -> dict[
         lines.append(f"[{i}] ({it.origin}{extra}) {it.title}\n{it.text[:4000]}")
     user = f"# 研究画像\n{profile}\n\n# 待评分条目\n" + "\n\n".join(lines)
     try:
-        d = llm.json(SCORE_SYSTEM, user, temperature=0.0, max_tokens=8000)
+        d = llm.json(SCORE_SYSTEM + "\n\n" + style.rules(), user, temperature=0.0, max_tokens=8000)
     except Exception as e:  # noqa: BLE001
         log.warning("scoring batch failed: %s", e)
         return {}

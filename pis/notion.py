@@ -87,17 +87,20 @@ class Notion:
     def archive(self, page_id: str) -> None:
         self.req("PATCH", f"/pages/{page_id}", json={"archived": True})
 
-    def page_text(self, page_id: str) -> str:
-        """Plain text of a page (used to read the editable research profile)."""
+    def page_text(self, page_id: str, depth: int = 0) -> str:
+        """Plain text of a page, nested blocks included (research profile, AGENTS.md)."""
         lines = []
         for b in self.children(page_id):
             data = b.get(b["type"], {})
             rt = data.get("rich_text")
             if rt is not None:
-                prefix = {"heading_1": "# ", "heading_2": "## ", "heading_3": "### ",
+                prefix = {"heading_1": "# ", "heading_2": "## ", "heading_3": "### ", "quote": "> ",
                           "bulleted_list_item": "- ", "numbered_list_item": "- ", "to_do": "- "}.get(b["type"], "")
-                lines.append(prefix + "".join(t.get("plain_text", "") for t in rt))
-        return "\n".join(lines).strip()
+                lines.append("  " * depth + prefix + "".join(t.get("plain_text", "") for t in rt))
+            if b.get("has_children") and b["type"] not in ("child_page", "child_database"):
+                lines.append(self.page_text(b["id"], depth + 1))
+        text = "\n".join(x for x in lines if x)
+        return text.strip() if depth == 0 else text
 
     # ---- databases ------------------------------------------------------
     def query_db(self, db_id: str, filter_: dict | None = None, sorts: list | None = None) -> list[dict]:
