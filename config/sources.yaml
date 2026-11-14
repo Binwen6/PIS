@@ -5,6 +5,7 @@ notion:
   pis_page_id: 40ad4b61-755e-80b0-a159-f34c3f246739   # 「PIS-Personal Information Source」
   pis_page_title: PIS                                  # pis_page_id 为空时按标题搜索
 window_hours: 26          # 回看窗口（略大于 24h，防止定时任务延迟漏掉内容）
+dedupe_days: 30           # 近 N 天推送过的论文和博客不再推送；在打分前剔除，空出的名额由新候选补上
 
 llm:
   base_url: https://api.deepseek.com

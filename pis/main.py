@@ -105,15 +105,20 @@ def run(args) -> int:
             + (f"：{it.text}" if it.extra.get("instant") and it.text else "") for it in inbox + instant)
 
     acfg, fcfg, lcfg = cfg.get("arxiv", {}), cfg.get("feeds", {}), cfg["llm"]
+    dedupe_days = cfg.get("dedupe_days", 30)
+    papers, dup_p = memory.drop_pushed(papers, mem, today, dedupe_days)
+    news, dup_n = memory.drop_pushed(news, mem, today, dedupe_days)
+    log.info("dedupe: skipped %d papers and %d posts pushed in the last %d days", dup_p, dup_n, dedupe_days)
     n_papers_raw = len(papers)
     papers = rank.prefilter(papers, context, acfg.get("prefilter_max", 800))
     rank.score(llm, context, papers + news, lcfg.get("score_batch_size", 40), lcfg.get("max_workers", 4))
     top_papers = rank.select(papers, acfg.get("min_score", 6), acfg.get("max_in_digest", 15))
     top_news = rank.select(news, fcfg.get("min_score", 6), fcfg.get("max_in_digest", 10))
+    memory.mark_pushed(mem, top_papers + top_news, today, dedupe_days)
 
     numbered = list(enumerate(top_papers + top_news + inbox + instant, start=1))
     d = make_digest(llm, context, numbered, cfg["llm"].get("digest_max_tokens", 32768))
-    stats = (f"arXiv/HF 共 {n_papers_raw} 篇 → 精选 {len(top_papers)} 篇；动态 {len(news)} 条 → 精选 {len(top_news)} 条；"
+    stats = (f"arXiv/HF 共 {n_papers_raw} 篇（另有 {dup_p} 篇近 {dedupe_days} 天推送过，已跳过）→ 精选 {len(top_papers)} 篇；动态 {len(news)} 条 → 精选 {len(top_news)} 条；"
              f"收藏 {len(inbox) + len(instant)} 条；模型 {llm.model}；tokens 入 {llm.usage['prompt_tokens']} / 出 {llm.usage['completion_tokens']}")
 
     out_dir = ROOT / "out"

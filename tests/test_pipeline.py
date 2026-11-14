@@ -277,6 +277,8 @@ def test_end_to_end(monkeypatch, tmp_path):
     assert pid == "mem" and mem["interests"][0]["topic"] == "Agent 评测"
     assert mem["feedback_seen"] == ["https://arxiv.org/abs/2610.0"]
     assert mem["recent_headlines"] == ["2026-10-30：昨天头条", "2026-10-31：RLVR 走向 Agent"]
+    assert mem["pushed"] == {"arxiv:2610.00001": "2026-10-31", "arxiv:2610.00003": "2026-10-31",
+                             "https://example.com/post": "2026-10-31"}             # today's picks recorded
     paths = {(m, p) for m, p, _ in fake.reqs}
     assert ("PATCH", "/pages/mem") in paths and ("PATCH", "/databases/lib") in paths   # renames + 类型 column
     assert any(j.get("title", [{}])[0].get("text", {}).get("content") == "知识库" for _, p, j in fake.reqs if j and "title" in j)
@@ -653,3 +655,19 @@ def test_page_text_reads_nested_blocks():
     n = Notion.__new__(Notion)
     n.children = lambda bid: tree.get(bid, [])
     assert n.page_text("p") == "## 禁绝格式主义\n- 垃圾内容\n  - 不要加共识性内容"
+
+
+def test_dedupe_skips_earlier_pushes_and_refills():
+    from pis import memory, rank
+    from pis.common import Item
+    today = date(2026, 11, 14)
+    mem = {"pushed": {"arxiv:old": "2026-11-13", "arxiv:today": "2026-11-14", "arxiv:expired": "2026-10-01"}}
+    items = [Item(source="arxiv", title=k, url=k, key=f"arxiv:{k}", score=s)
+             for k, s in [("old", 9), ("today", 9), ("expired", 9), ("new1", 8), ("new2", 7), ("low", 3)]]
+    kept, dropped = memory.drop_pushed(items, mem, today, 30)
+    assert dropped == 1 and [it.title for it in kept] == ["today", "expired", "new1", "new2", "low"]
+    # yesterday's pick is gone and the next new candidate takes its slot; the score threshold still applies
+    assert [it.title for it in rank.select(kept, 6, 3)] == ["today", "expired", "new1"]
+    memory.mark_pushed(mem, rank.select(kept, 6, 3), today, 30)
+    assert mem["pushed"] == {"arxiv:old": "2026-11-13", "arxiv:today": "2026-11-14",
+                             "arxiv:expired": "2026-11-14", "arxiv:new1": "2026-11-14"}

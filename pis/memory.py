@@ -20,7 +20,7 @@ from . import style
 from . import notion as N
 
 EMPTY = {"interests": [], "threads": [], "preferences": [], "notes": "",
-         "recent_headlines": [], "feedback_seen": []}
+         "recent_headlines": [], "feedback_seen": [], "pushed": {}}
 
 MEMORY_SYSTEM = """你负责维护一位科研人员的“动态兴趣记忆”。输入包括：长期研究画像（用户亲手写的，稳定）、旧记忆、以及今天的新行为信号。
 请输出更新后的记忆 JSON：
@@ -71,6 +71,23 @@ def as_prompt(mem: dict, today: date | None = None) -> str:
         lines.append("最近几天的头条（避免重复，必要时承接）：")
         lines += [f"- {h}" for h in past[-5:]]
     return "\n".join(lines)
+
+
+def drop_pushed(items: list[Item], mem: dict, today: date, days: int) -> tuple[list[Item], int]:
+    """Remove items already pushed on an earlier day within the last `days` days.
+    Runs before ranking, so freed slots go to the next-best new candidates."""
+    cutoff, now = (today - timedelta(days=days)).isoformat(), today.isoformat()
+    seen = {k for k, d in mem.get("pushed", {}).items() if cutoff <= d < now}
+    kept = [it for it in items if it.key not in seen]
+    return kept, len(items) - len(kept)
+
+
+def mark_pushed(mem: dict, items: list[Item], today: date, days: int) -> None:
+    cutoff = (today - timedelta(days=days)).isoformat()
+    pushed = {k: d for k, d in mem.get("pushed", {}).items() if d >= cutoff}
+    for it in items:
+        pushed.setdefault(it.key, today.isoformat())
+    mem["pushed"] = pushed
 
 
 def collect_feedback(notion: Notion | None, parent: str, today: date, mem: dict, days: int = 3) -> list[str]:
